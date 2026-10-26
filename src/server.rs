@@ -34,8 +34,11 @@ use tokio_stream::wrappers::ReceiverStream;
 use tracing::{error, info, warn};
 
 pub const BUFFER_SIZE: usize = 1024 * 1024; // 1 MB buffer chunk
-const MAX_CONCURRENT_SESSIONS: usize = 8;
-const SESSION_TTL: Duration = Duration::from_secs(300); // 5 minutes
+pub const MAX_CONCURRENT_SESSIONS: usize = 8;
+pub const SESSION_TTL: Duration = Duration::from_secs(300); // 5 minutes
+pub const MAX_FILES_PER_OFFER: usize = 10_000;
+pub const MAX_FILE_SIZE: u64 = 1024 * 1024 * 1024 * 1024; // 1 TB per file
+pub const MAX_OFFER_TOTAL_SIZE: u64 = 2 * 1024 * 1024 * 1024 * 1024; // 2 TB total per offer
 
 static EMBEDDED_UI: &str = include_str!("../ui/index.html");
 
@@ -131,7 +134,26 @@ pub async fn build_router(state: ServerState) -> Router {
                 .head(handle_get_upload_status)
                 .get(handle_get_upload_status),
         )
+        .layer(axum::middleware::from_fn(private_ip_guard))
         .with_state(state)
+}
+
+async fn private_ip_guard(
+    axum::extract::ConnectInfo(addr): axum::extract::ConnectInfo<SocketAddr>,
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Result<axum::response::Response, (StatusCode, &'static str)> {
+    if !is_private_or_loopback_ip(&addr.ip()) {
+        warn!(
+            "🚨 Blocked unauthorized request from non-private IP: {}",
+            addr.ip()
+        );
+        return Err((
+            StatusCode::FORBIDDEN,
+            "Access denied: Drop It accepts local network connections only",
+        ));
+    }
+    Ok(next.run(req).await)
 }
 
 pub async fn run_server(
@@ -490,9 +512,34 @@ async fn handle_post_offer(
         }
     }
 
-    // 4. Validate offer payload
+    // 4. Validate offer payload & security limits
     if offer.files.is_empty() {
         return Err((StatusCode::BAD_REQUEST, "File list cannot be empty".into()));
+    }
+    if offer.files.len() > MAX_FILES_PER_OFFER {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!("Too many files in offer (maximum {MAX_FILES_PER_OFFER})"),
+        ));
+    }
+    let mut total_bytes = 0u64;
+    for file in &offer.files {
+        if file.filename.trim().is_empty() {
+            return Err((StatusCode::BAD_REQUEST, "Filename cannot be empty".into()));
+        }
+        if file.size_bytes > MAX_FILE_SIZE {
+            return Err((
+                StatusCode::PAYLOAD_TOO_LARGE,
+                format!("File '{}' exceeds maximum allowed size", file.filename),
+            ));
+        }
+        total_bytes = total_bytes.saturating_add(file.size_bytes);
+    }
+    if total_bytes > MAX_OFFER_TOTAL_SIZE {
+        return Err((
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "Total offer size exceeds maximum allowed transfer size".into(),
+        ));
     }
 
     // 5. Pairing code & trust verification
@@ -680,6 +727,13 @@ async fn handle_get_upload_status(
             )
         })?;
 
+        if session.created_at.elapsed() >= SESSION_TTL {
+            return Err((
+                StatusCode::UNAUTHORIZED,
+                format!("Session '{session_id}' has expired"),
+            ));
+        }
+
         if session.session_token != auth_header {
             return Err((StatusCode::FORBIDDEN, "Invalid session token".into()));
         }
@@ -750,6 +804,13 @@ async fn handle_put_upload(
                 format!("Session '{session_id}' not found or expired"),
             )
         })?;
+
+        if session.created_at.elapsed() >= SESSION_TTL {
+            return Err((
+                StatusCode::UNAUTHORIZED,
+                format!("Session '{session_id}' has expired"),
+            ));
+        }
 
         if session.session_token != auth_header {
             return Err((StatusCode::FORBIDDEN, "Invalid session token".into()));
