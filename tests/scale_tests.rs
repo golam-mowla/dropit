@@ -57,9 +57,7 @@ async fn test_send_2gb_large_file_streaming() {
     // Fast streaming hash calculation for 2 GB sparse file (all zeroes)
     println!("Calculating BLAKE3 streaming hash for 2 GB file...");
     let hash_start = Instant::now();
-    let expected_hash = crypto::hash_file_streaming(&large_file_path)
-        .await
-        .unwrap();
+    let expected_hash = crypto::hash_file_streaming(&large_file_path).await.unwrap();
     println!(
         "2 GB BLAKE3: {} (calculated in {:.2}s)",
         expected_hash,
