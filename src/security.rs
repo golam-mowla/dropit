@@ -62,11 +62,10 @@ pub fn validate_client_address(peer_addr: SocketAddr) -> Result<()> {
 /// - Guards against Windows reserved names (CON, NUL, COM1, etc.)
 /// - Fallbacks to "unnamed_file" if empty
 pub fn sanitize_filename(raw_name: &str) -> String {
-    // Cross-platform basename extraction: split by both '/' and '\' to work identically on Unix and Windows
+    // Basename extraction: split by both '/' and '\'
     let basename = raw_name
         .split(['/', '\\'])
-        .filter(|s| !s.is_empty())
-        .last()
+        .rfind(|s| !s.is_empty())
         .unwrap_or("unnamed_file");
 
     let mut clean: String = basename
