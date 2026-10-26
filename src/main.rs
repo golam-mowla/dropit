@@ -1,10 +1,17 @@
-use anyhow::Result;
+use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
-use dropit::config;
-use dropit::crypto;
+use dropit::client::DropItClient;
+use dropit::config::{self, DropItConfig};
+use dropit::crypto::{self, TlsIdentity};
 use dropit::discovery::{DeviceAnnouncement, DiscoveryManager, PeerEvent, PeerRegistry};
+use dropit::server::{OfferDecisionRequest, ServerState, run_server};
+use dropit::transfer::{FileMetadata, TransferOfferRequest};
+use std::io::Write;
+use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::{RwLock, broadcast, mpsc};
 use tracing_subscriber::EnvFilter;
 
 #[derive(Parser, Debug)]
@@ -61,9 +68,11 @@ enum Commands {
 async fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn")),
         )
         .init();
+
+    crypto::init_crypto_provider();
 
     let cli = Cli::parse();
 
@@ -86,72 +95,9 @@ async fn main() -> Result<()> {
         Some(Commands::Send {
             files,
             to,
-            verify_hash: _,
+            verify_hash,
         }) => {
-            println!("🚀 Mode: Send");
-            println!("📁 Files to transfer: {}", files.len());
-            for f in &files {
-                let size_str = match std::fs::metadata(f) {
-                    Ok(m) => format!("({} bytes)", m.len()),
-                    Err(_) => "(not found)".to_string(),
-                };
-                println!("   - {:?} {}", f, size_str);
-            }
-
-            let registry = PeerRegistry::new();
-            let mut discovery = DiscoveryManager::new(announcement, registry.clone());
-            discovery.start().await?;
-
-            if let Some(target) = to {
-                println!("🔍 Searching for target device '{target}'...");
-                let start = std::time::Instant::now();
-                let mut found_peer = None;
-
-                while start.elapsed() < Duration::from_secs(5) {
-                    let peers = registry.get_active_peers().await;
-                    for p in peers {
-                        if p.announcement.name.eq_ignore_ascii_case(&target)
-                            || p.announcement.device_id == target
-                            || p.address.ip().to_string() == target
-                        {
-                            found_peer = Some(p);
-                            break;
-                        }
-                    }
-                    if found_peer.is_some() {
-                        break;
-                    }
-                    tokio::time::sleep(Duration::from_millis(250)).await;
-                }
-
-                if let Some(peer) = found_peer {
-                    println!(
-                        "✅ Target device found: {} ({}) [FP: {}]",
-                        peer.announcement.name, peer.address, peer.announcement.fingerprint
-                    );
-                    println!("(Direct file streaming via TLS 1.3 will connect in Phase 3)");
-                } else {
-                    println!(
-                        "❌ Could not find device '{target}' on the local network within 5 seconds."
-                    );
-                }
-            } else {
-                println!("🔍 Scanning for nearby devices (waiting 3s)...");
-                tokio::time::sleep(Duration::from_secs(3)).await;
-                let peers = registry.get_active_peers().await;
-                if peers.is_empty() {
-                    println!("ℹ️  No other Drop It devices detected on this WiFi network yet.");
-                } else {
-                    println!("📡 Nearby devices found:");
-                    for p in peers {
-                        println!(
-                            "   • {} ({}) - FP: {}",
-                            p.announcement.name, p.address, p.announcement.fingerprint
-                        );
-                    }
-                }
-            }
-            discovery.stop();
+            handle_send_command(config, identity, announcement, files, to, verify_hash).await?;
         }
 
         Some(Commands::Receive {
@@ -167,90 +113,11 @@ async fn main() -> Result<()> {
             }
             config.auto_accept_trusted = auto_accept;
 
-            println!("📥 Mode: Receive / Web UI");
-            println!("🌐 Server Port: {}", config.port);
-            println!("📂 Download directory: {:?}", config.download_dir);
-
-            let registry = PeerRegistry::new();
-            let mut event_rx = registry.subscribe();
-            let mut discovery = DiscoveryManager::new(announcement, registry);
-            discovery.start().await?;
-
-            println!("📡 LAN discovery active. Listening for nearby devices (Ctrl+C to quit)...");
-
-            tokio::spawn(async move {
-                while let Ok(event) = event_rx.recv().await {
-                    match event {
-                        PeerEvent::Added(peer) => {
-                            println!(
-                                "🟢 Discovered device: {} ({}) via {:?}",
-                                peer.announcement.name, peer.address, peer.source
-                            );
-                        }
-                        PeerEvent::Updated(peer) => {
-                            println!(
-                                "🔄 Updated device: {} ({})",
-                                peer.announcement.name, peer.address
-                            );
-                        }
-                        PeerEvent::Removed(id) => {
-                            println!("🔴 Device disappeared: {}", id);
-                        }
-                    }
-                }
-            });
-
-            tokio::signal::ctrl_c().await?;
-            println!("\n👋 Shutting down...");
-            discovery.stop();
+            handle_receive_command(config, identity, announcement).await?;
         }
 
         Some(Commands::Discover { timeout }) => {
-            println!("🔍 Scanning local network for {timeout} seconds...");
-            let registry = PeerRegistry::new();
-            let mut event_rx = registry.subscribe();
-            let mut discovery = DiscoveryManager::new(announcement, registry.clone());
-            discovery.start().await?;
-
-            let start = std::time::Instant::now();
-            let scan_duration = Duration::from_secs(timeout);
-
-            while start.elapsed() < scan_duration {
-                let remaining = scan_duration.saturating_sub(start.elapsed());
-                tokio::select! {
-                    Ok(event) = event_rx.recv() => {
-                        match event {
-                            PeerEvent::Added(peer) => {
-                                println!(
-                                    "✨ Found: {} ({}) [FP: {}] via {:?}",
-                                    peer.announcement.name, peer.address, peer.announcement.fingerprint, peer.source
-                                );
-                            }
-                            PeerEvent::Removed(id) => {
-                                println!("💨 Disappeared: {}", id);
-                            }
-                            _ => {}
-                        }
-                    }
-                    _ = tokio::time::sleep(remaining) => {
-                        break;
-                    }
-                }
-            }
-
-            let peers = registry.get_active_peers().await;
-            println!("-------------------------------------------------------------------");
-            println!("📊 Total active devices found: {}", peers.len());
-            for (idx, p) in peers.iter().enumerate() {
-                println!(
-                    "  {}. {} ({}) [FP: {}]",
-                    idx + 1,
-                    p.announcement.name,
-                    p.address,
-                    p.announcement.fingerprint
-                );
-            }
-            discovery.stop();
+            handle_discover_command(announcement, timeout).await?;
         }
 
         None => {
@@ -262,6 +129,385 @@ async fn main() -> Result<()> {
         }
     }
 
+    Ok(())
+}
+
+async fn handle_send_command(
+    config: DropItConfig,
+    identity: TlsIdentity,
+    announcement: DeviceAnnouncement,
+    file_paths: Vec<PathBuf>,
+    to: Option<String>,
+    verify_hash: bool,
+) -> Result<()> {
+    // 1. Validate files exist
+    let mut meta_list = Vec::new();
+    let mut total_size = 0u64;
+
+    for (idx, path) in file_paths.iter().enumerate() {
+        if !path.exists() {
+            bail!("File not found: {:?}", path);
+        }
+        let m = std::fs::metadata(path)
+            .with_context(|| format!("Failed to read metadata for {:?}", path))?;
+        if m.is_dir() {
+            bail!("Directories cannot be sent directly: {:?}", path);
+        }
+
+        let size = m.len();
+        total_size += size;
+        let filename = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unnamed_file")
+            .to_string();
+
+        let blake3_hash = if verify_hash {
+            print!("⏳ Hashing {}...", filename);
+            let _ = std::io::stdout().flush();
+            let data = tokio::fs::read(path).await?;
+            let h = blake3::hash(&data).to_hex().to_string();
+            println!(" Done ({})", &h[..8]);
+            Some(h)
+        } else {
+            None
+        };
+
+        meta_list.push(FileMetadata {
+            file_id: idx.to_string(),
+            filename,
+            size_bytes: size,
+            blake3_hash,
+        });
+    }
+
+    println!(
+        "📁 Files to send: {} ({:.2} MB total)",
+        meta_list.len(),
+        total_size as f64 / (1024.0 * 1024.0)
+    );
+
+    // 2. Discover or resolve target device
+    let registry = PeerRegistry::new();
+    let mut discovery = DiscoveryManager::new(announcement, registry.clone());
+    discovery.start().await?;
+
+    let target_str = match to {
+        Some(t) => t,
+        None => {
+            println!("🔍 Scanning for nearby devices (waiting 3s)...");
+            tokio::time::sleep(Duration::from_secs(3)).await;
+            let peers = registry.get_active_peers().await;
+            if peers.is_empty() {
+                discovery.stop();
+                bail!("No nearby Drop It devices found. Specify target with `--to <device>`");
+            }
+            println!("📡 Select a target device:");
+            for (i, p) in peers.iter().enumerate() {
+                println!("  [{}] {} ({})", i + 1, p.announcement.name, p.address);
+            }
+            peers[0].announcement.name.clone()
+        }
+    };
+
+    println!("🔍 Resolving target device '{}'...", target_str);
+    let start = std::time::Instant::now();
+    let mut target_addr = None;
+    let mut target_fp = String::new();
+    let mut target_name = target_str.clone();
+
+    // Check if target is a direct IP:Port
+    if let Ok(addr) = target_str.parse::<SocketAddr>() {
+        target_addr = Some(addr);
+    } else if let Ok(ip) = target_str.parse::<std::net::IpAddr>() {
+        target_addr = Some(SocketAddr::new(ip, config.port));
+    } else {
+        while start.elapsed() < Duration::from_secs(5) {
+            let peers = registry.get_active_peers().await;
+            for p in peers {
+                if p.announcement.name.eq_ignore_ascii_case(&target_str)
+                    || p.announcement.device_id == target_str
+                {
+                    target_addr = Some(p.address);
+                    target_fp = p.announcement.fingerprint.clone();
+                    target_name = p.announcement.name.clone();
+                    break;
+                }
+            }
+            if target_addr.is_some() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+    }
+
+    discovery.stop();
+
+    let target_addr = match target_addr {
+        Some(a) => a,
+        None => bail!(
+            "Could not find target device '{}' on the local network",
+            target_str
+        ),
+    };
+
+    let client = DropItClient::new();
+    let host_port = target_addr.to_string();
+
+    // Fetch device info if target fingerprint is not known yet
+    if target_fp.is_empty()
+        && let Ok(info) = client.get_device_info(&host_port).await
+    {
+        if let Some(fp) = info.get("fingerprint").and_then(|v| v.as_str()) {
+            target_fp = fp.to_string();
+        }
+        if let Some(n) = info.get("name").and_then(|v| v.as_str()) {
+            target_name = n.to_string();
+        }
+    }
+
+    let pairing_code = crypto::generate_pairing_code(&identity.fingerprint, &target_fp);
+
+    println!("🤝 Connecting to: {} ({})", target_name, host_port);
+    println!("🔢 Pairing Confirmation Code: [ {} ]", pairing_code);
+    println!("⏳ Waiting for receiver acceptance...");
+
+    let session_id = hex::encode(rand::random::<[u8; 16]>());
+    let offer_req = TransferOfferRequest {
+        session_id: session_id.clone(),
+        sender_name: config.device_name.clone(),
+        sender_device_id: config.device_id.clone(),
+        sender_fingerprint: identity.fingerprint.clone(),
+        files: meta_list.clone(),
+    };
+
+    let offer_resp = client.send_offer(&host_port, &offer_req).await?;
+    if !offer_resp.accepted {
+        bail!(
+            "Transfer declined by receiver: {}",
+            offer_resp.reason.unwrap_or_else(|| "Unknown reason".into())
+        );
+    }
+
+    let session_token = offer_resp
+        .session_token
+        .context("Missing session token from accepted offer")?;
+    println!("✅ Offer accepted! Streaming files directly disk -> socket...");
+
+    let total_start = std::time::Instant::now();
+
+    for (idx, meta) in meta_list.iter().enumerate() {
+        let file_path = &file_paths[idx];
+        println!(
+            "\n📤 [{}/{}] Streaming: {}",
+            idx + 1,
+            meta_list.len(),
+            meta.filename
+        );
+
+        let upload_res = client
+            .stream_file(
+                &host_port,
+                &session_id,
+                &session_token,
+                meta,
+                file_path,
+                |p| {
+                    let pct = if p.total_bytes > 0 {
+                        (p.bytes_transferred as f64 / p.total_bytes as f64) * 100.0
+                    } else {
+                        100.0
+                    };
+                    let eta_str = p.eta_secs.map(|s| format!("{s}s")).unwrap_or_else(|| "--".into());
+                    print!(
+                        "\r   Progress: {:>5.1}% | {:>6.2} MB/s | ETA: {:>4} | {:>6.1} / {:>6.1} MB",
+                        pct,
+                        p.speed_mb_s,
+                        eta_str,
+                        p.bytes_transferred as f64 / (1024.0 * 1024.0),
+                        p.total_bytes as f64 / (1024.0 * 1024.0)
+                    );
+                    let _ = std::io::stdout().flush();
+                },
+            )
+            .await?;
+
+        println!(
+            "\n   ✔️ Completed (blake3: {}, verified: {})",
+            &upload_res.blake3_hash[..8],
+            upload_res.verified
+        );
+    }
+
+    let elapsed = total_start.elapsed().as_secs_f64();
+    let overall_speed = if elapsed > 0.05 {
+        (total_size as f64 / (1024.0 * 1024.0)) / elapsed
+    } else {
+        0.0
+    };
+
+    println!(
+        "\n🎉 Transfer complete! {} file(s) sent in {:.2}s ({:.2} MB/s average).",
+        meta_list.len(),
+        elapsed,
+        overall_speed
+    );
+    Ok(())
+}
+
+async fn handle_receive_command(
+    config: DropItConfig,
+    identity: TlsIdentity,
+    announcement: DeviceAnnouncement,
+) -> Result<()> {
+    println!("📥 Mode: Receive / TLS 1.3 Server");
+    println!("🌐 Port: {}", config.port);
+    println!("📂 Save Path: {:?}", config.download_dir);
+
+    let config_arc = Arc::new(RwLock::new(config.clone()));
+    let (prompt_tx, mut prompt_rx) = mpsc::channel::<OfferDecisionRequest>(16);
+
+    let server_state = ServerState::new(config_arc.clone(), identity.clone(), Some(prompt_tx));
+
+    let bind_addr: SocketAddr = SocketAddr::new(
+        std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
+        config.port,
+    );
+
+    let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
+
+    // Start discovery
+    let registry = PeerRegistry::new();
+    let mut event_rx = registry.subscribe();
+    let mut discovery = DiscoveryManager::new(announcement, registry);
+    discovery.start().await?;
+
+    // Start HTTP/TLS Server in background
+    let server_handle = tokio::spawn(async move {
+        if let Err(err) = run_server(server_state, bind_addr, Some(shutdown_rx)).await {
+            eprintln!("Server error: {:#}", err);
+        }
+    });
+
+    // Discovery event monitor
+    tokio::spawn(async move {
+        while let Ok(event) = event_rx.recv().await {
+            match event {
+                PeerEvent::Added(peer) => {
+                    println!(
+                        "🟢 Discovered nearby device: {} ({})",
+                        peer.announcement.name, peer.address
+                    );
+                }
+                PeerEvent::Removed(id) => {
+                    println!("🔴 Nearby device disappeared: {}", id);
+                }
+                _ => {}
+            }
+        }
+    });
+
+    // Offer prompt handler
+    tokio::spawn(async move {
+        while let Some(req) = prompt_rx.recv().await {
+            println!("\n🔔 Incoming transfer offer!");
+            println!(
+                "   From: {} [FP: {}]",
+                req.offer.sender_name, req.offer.sender_fingerprint
+            );
+            println!("   Pairing Confirmation Code: [ {} ]", req.pairing_code);
+            println!("   Files ({}) :", req.offer.files.len());
+            for f in &req.offer.files {
+                println!(
+                    "     - {} ({:.2} MB)",
+                    f.filename,
+                    f.size_bytes as f64 / (1024.0 * 1024.0)
+                );
+            }
+
+            if req.is_trusted {
+                println!("   (Device is pinned and trusted)");
+            }
+
+            print!("👉 Accept transfer? [Y/n]: ");
+            let _ = std::io::stdout().flush();
+
+            // Simple line reading
+            let mut line = String::new();
+            let accepted = if std::io::stdin().read_line(&mut line).is_ok() {
+                let s = line.trim();
+                s.is_empty() || s.eq_ignore_ascii_case("y") || s.eq_ignore_ascii_case("yes")
+            } else {
+                true
+            };
+
+            if accepted {
+                println!("✅ Transfer accepted! Receiving files...");
+            } else {
+                println!("❌ Transfer declined.");
+            }
+            let _ = req.response_tx.send(accepted);
+        }
+    });
+
+    println!("\n📡 Drop It is ready to receive files on your local WiFi network.");
+    println!("💡 Press Ctrl+C to stop.");
+
+    tokio::signal::ctrl_c().await?;
+    println!("\n👋 Shutting down server...");
+    let _ = shutdown_tx.send(());
+    discovery.stop();
+    let _ = server_handle.await;
+
+    Ok(())
+}
+
+async fn handle_discover_command(announcement: DeviceAnnouncement, timeout: u64) -> Result<()> {
+    println!("🔍 Scanning local network for {timeout} seconds...");
+    let registry = PeerRegistry::new();
+    let mut event_rx = registry.subscribe();
+    let mut discovery = DiscoveryManager::new(announcement, registry.clone());
+    discovery.start().await?;
+
+    let start = std::time::Instant::now();
+    let scan_duration = Duration::from_secs(timeout);
+
+    while start.elapsed() < scan_duration {
+        let remaining = scan_duration.saturating_sub(start.elapsed());
+        tokio::select! {
+            Ok(event) = event_rx.recv() => {
+                match event {
+                    PeerEvent::Added(peer) => {
+                        println!(
+                            "✨ Found: {} ({}) [FP: {}] via {:?}",
+                            peer.announcement.name, peer.address, peer.announcement.fingerprint, peer.source
+                        );
+                    }
+                    PeerEvent::Removed(id) => {
+                        println!("💨 Disappeared: {}", id);
+                    }
+                    _ => {}
+                }
+            }
+            _ = tokio::time::sleep(remaining) => {
+                break;
+            }
+        }
+    }
+
+    let peers = registry.get_active_peers().await;
+    println!("-------------------------------------------------------------------");
+    println!("📊 Total active devices found: {}", peers.len());
+    for (idx, p) in peers.iter().enumerate() {
+        println!(
+            "  {}. {} ({}) [FP: {}]",
+            idx + 1,
+            p.announcement.name,
+            p.address,
+            p.announcement.fingerprint
+        );
+    }
+    discovery.stop();
     Ok(())
 }
 

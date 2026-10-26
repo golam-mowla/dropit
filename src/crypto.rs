@@ -5,6 +5,10 @@ use std::fs;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 
+pub fn init_crypto_provider() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+}
+
 #[derive(Clone, Debug)]
 pub struct TlsIdentity {
     pub cert_pem: String,
@@ -52,6 +56,7 @@ impl TlsIdentity {
     }
 
     pub fn generate_self_signed(device_name: &str) -> Result<Self> {
+        init_crypto_provider();
         let key_pair = KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)
             .context("Failed to generate ECDSA P256 key pair")?;
 
