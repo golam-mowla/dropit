@@ -13,8 +13,8 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/dropit-app/dropit/actions/workflows/ci.yml"><img src="https://github.com/dropit-app/dropit/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://github.com/dropit-app/dropit/releases"><img src="https://img.shields.io/github/v/release/dropit-app/dropit?color=6366F1" alt="Release"></a>
+  <a href="https://github.com/golam-mowla/dropit/actions/workflows/ci.yml"><img src="https://github.com/golam-mowla/dropit/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/golam-mowla/dropit/releases"><img src="https://img.shields.io/github/v/release/golam-mowla/dropit?color=6366F1" alt="Release"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-6366F1.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/Rust-2024_Edition-orange.svg" alt="Rust Edition">
   <img src="https://img.shields.io/badge/Security_Audit-Passing-brightgreen.svg" alt="Audit">
@@ -56,11 +56,11 @@ Single static binaries ready to run with zero installation or runtime dependenci
 
 | Platform | Architecture | Binary Package |
 | :--- | :--- | :--- |
-| **Windows** | x86_64 (64-bit) | [`dropit-windows-x64.zip`](https://github.com/dropit-app/dropit/releases/latest) |
-| **Linux** | x86_64 (64-bit) | [`dropit-linux-x64.tar.gz`](https://github.com/dropit-app/dropit/releases/latest) |
-| **Linux** | aarch64 (ARM64) | [`dropit-linux-arm64.tar.gz`](https://github.com/dropit-app/dropit/releases/latest) |
-| **macOS** | Apple Silicon (M1/M2/M3/M4) | [`dropit-macos-arm64.tar.gz`](https://github.com/dropit-app/dropit/releases/latest) |
-| **macOS** | Intel (x86_64) | [`dropit-macos-x64.tar.gz`](https://github.com/dropit-app/dropit/releases/latest) |
+| **Windows** | x86_64 (64-bit) | [`dropit-windows-x64.zip`](https://github.com/golam-mowla/dropit/releases/latest) |
+| **Linux** | x86_64 (64-bit) | [`dropit-linux-x64.tar.gz`](https://github.com/golam-mowla/dropit/releases/latest) |
+| **Linux** | aarch64 (ARM64) | [`dropit-linux-arm64.tar.gz`](https://github.com/golam-mowla/dropit/releases/latest) |
+| **macOS** | Apple Silicon (M1/M2/M3/M4) | [`dropit-macos-arm64.tar.gz`](https://github.com/golam-mowla/dropit/releases/latest) |
+| **macOS** | Intel (x86_64) | [`dropit-macos-x64.tar.gz`](https://github.com/golam-mowla/dropit/releases/latest) |
 
 ---
 
@@ -132,7 +132,7 @@ chmod +x dropit
 
 ```bash
 # Clone the repository
-git clone https://github.com/dropit-app/dropit.git
+git clone https://github.com/golam-mowla/dropit.git
 cd dropit
 
 # Run all unit and integration tests
