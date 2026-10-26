@@ -2,7 +2,9 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use dropit::config;
 use dropit::crypto;
+use dropit::discovery::{DeviceAnnouncement, DiscoveryManager, PeerEvent, PeerRegistry};
 use std::path::PathBuf;
+use std::time::Duration;
 use tracing_subscriber::EnvFilter;
 
 #[derive(Parser, Debug)]
@@ -23,7 +25,7 @@ enum Commands {
         #[arg(required = true)]
         files: Vec<PathBuf>,
 
-        /// Name or IP of the target device
+        /// Name, IP, or Device ID of the target device
         #[arg(short, long)]
         to: Option<String>,
 
@@ -46,6 +48,13 @@ enum Commands {
         #[arg(long, default_value_t = false)]
         auto_accept: bool,
     },
+
+    /// Scan and list nearby Drop It devices on the local network
+    Discover {
+        /// Timeout in seconds to scan for devices
+        #[arg(short, long, default_value_t = 5)]
+        timeout: u64,
+    },
 }
 
 #[tokio::main]
@@ -65,6 +74,14 @@ async fn main() -> Result<()> {
 
     print_welcome_banner(&config, &identity);
 
+    let announcement = DeviceAnnouncement {
+        device_id: config.device_id.clone(),
+        name: config.device_name.clone(),
+        fingerprint: identity.fingerprint.clone(),
+        port: config.port,
+        version: env!("CARGO_PKG_VERSION").to_string(),
+    };
+
     match cli.command {
         Some(Commands::Send {
             files,
@@ -73,13 +90,70 @@ async fn main() -> Result<()> {
         }) => {
             println!("🚀 Mode: Send");
             println!("📁 Files to transfer: {}", files.len());
-            if let Some(target) = to {
-                println!("🎯 Target device: {target}");
-            } else {
-                println!("🔍 Scanning local network for nearby devices...");
+            for f in &files {
+                let size_str = match std::fs::metadata(f) {
+                    Ok(m) => format!("({} bytes)", m.len()),
+                    Err(_) => "(not found)".to_string(),
+                };
+                println!("   - {:?} {}", f, size_str);
             }
-            println!("(Network discovery and client transfer active in Phase 2 & 3)");
+
+            let registry = PeerRegistry::new();
+            let mut discovery = DiscoveryManager::new(announcement, registry.clone());
+            discovery.start().await?;
+
+            if let Some(target) = to {
+                println!("🔍 Searching for target device '{target}'...");
+                let start = std::time::Instant::now();
+                let mut found_peer = None;
+
+                while start.elapsed() < Duration::from_secs(5) {
+                    let peers = registry.get_active_peers().await;
+                    for p in peers {
+                        if p.announcement.name.eq_ignore_ascii_case(&target)
+                            || p.announcement.device_id == target
+                            || p.address.ip().to_string() == target
+                        {
+                            found_peer = Some(p);
+                            break;
+                        }
+                    }
+                    if found_peer.is_some() {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(250)).await;
+                }
+
+                if let Some(peer) = found_peer {
+                    println!(
+                        "✅ Target device found: {} ({}) [FP: {}]",
+                        peer.announcement.name, peer.address, peer.announcement.fingerprint
+                    );
+                    println!("(Direct file streaming via TLS 1.3 will connect in Phase 3)");
+                } else {
+                    println!(
+                        "❌ Could not find device '{target}' on the local network within 5 seconds."
+                    );
+                }
+            } else {
+                println!("🔍 Scanning for nearby devices (waiting 3s)...");
+                tokio::time::sleep(Duration::from_secs(3)).await;
+                let peers = registry.get_active_peers().await;
+                if peers.is_empty() {
+                    println!("ℹ️  No other Drop It devices detected on this WiFi network yet.");
+                } else {
+                    println!("📡 Nearby devices found:");
+                    for p in peers {
+                        println!(
+                            "   • {} ({}) - FP: {}",
+                            p.announcement.name, p.address, p.announcement.fingerprint
+                        );
+                    }
+                }
+            }
+            discovery.stop();
         }
+
         Some(Commands::Receive {
             port,
             dir,
@@ -94,14 +168,96 @@ async fn main() -> Result<()> {
             config.auto_accept_trusted = auto_accept;
 
             println!("📥 Mode: Receive / Web UI");
-            println!("🌐 Port: {}", config.port);
+            println!("🌐 Server Port: {}", config.port);
             println!("📂 Download directory: {:?}", config.download_dir);
-            println!("(HTTP/TLS server and embedded UI active in Phase 3 & 4)");
+
+            let registry = PeerRegistry::new();
+            let mut event_rx = registry.subscribe();
+            let mut discovery = DiscoveryManager::new(announcement, registry);
+            discovery.start().await?;
+
+            println!("📡 LAN discovery active. Listening for nearby devices (Ctrl+C to quit)...");
+
+            tokio::spawn(async move {
+                while let Ok(event) = event_rx.recv().await {
+                    match event {
+                        PeerEvent::Added(peer) => {
+                            println!(
+                                "🟢 Discovered device: {} ({}) via {:?}",
+                                peer.announcement.name, peer.address, peer.source
+                            );
+                        }
+                        PeerEvent::Updated(peer) => {
+                            println!(
+                                "🔄 Updated device: {} ({})",
+                                peer.announcement.name, peer.address
+                            );
+                        }
+                        PeerEvent::Removed(id) => {
+                            println!("🔴 Device disappeared: {}", id);
+                        }
+                    }
+                }
+            });
+
+            tokio::signal::ctrl_c().await?;
+            println!("\n👋 Shutting down...");
+            discovery.stop();
         }
+
+        Some(Commands::Discover { timeout }) => {
+            println!("🔍 Scanning local network for {timeout} seconds...");
+            let registry = PeerRegistry::new();
+            let mut event_rx = registry.subscribe();
+            let mut discovery = DiscoveryManager::new(announcement, registry.clone());
+            discovery.start().await?;
+
+            let start = std::time::Instant::now();
+            let scan_duration = Duration::from_secs(timeout);
+
+            while start.elapsed() < scan_duration {
+                let remaining = scan_duration.saturating_sub(start.elapsed());
+                tokio::select! {
+                    Ok(event) = event_rx.recv() => {
+                        match event {
+                            PeerEvent::Added(peer) => {
+                                println!(
+                                    "✨ Found: {} ({}) [FP: {}] via {:?}",
+                                    peer.announcement.name, peer.address, peer.announcement.fingerprint, peer.source
+                                );
+                            }
+                            PeerEvent::Removed(id) => {
+                                println!("💨 Disappeared: {}", id);
+                            }
+                            _ => {}
+                        }
+                    }
+                    _ = tokio::time::sleep(remaining) => {
+                        break;
+                    }
+                }
+            }
+
+            let peers = registry.get_active_peers().await;
+            println!("-------------------------------------------------------------------");
+            println!("📊 Total active devices found: {}", peers.len());
+            for (idx, p) in peers.iter().enumerate() {
+                println!(
+                    "  {}. {} ({}) [FP: {}]",
+                    idx + 1,
+                    p.announcement.name,
+                    p.address,
+                    p.announcement.fingerprint
+                );
+            }
+            discovery.stop();
+        }
+
         None => {
             println!(
                 "💡 Run `dropit receive` to wait for incoming transfers, or `dropit send <file>` to transfer."
             );
+            println!("💡 Run `dropit discover` to scan for nearby devices.");
             println!("💡 Run `dropit --help` for available options.");
         }
     }
