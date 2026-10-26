@@ -10,8 +10,10 @@ use tokio::sync::{RwLock, broadcast};
 
 #[tokio::test]
 async fn test_web_ui_and_api_endpoints() {
-    let mut config = DropItConfig::default();
-    config.device_name = "UI Test Node".to_string();
+    let config = DropItConfig {
+        device_name: "UI Test Node".to_string(),
+        ..Default::default()
+    };
 
     let identity = TlsIdentity::generate_self_signed("UI Test Node").unwrap();
     let config_arc = Arc::new(RwLock::new(config));
@@ -55,7 +57,7 @@ async fn test_web_ui_and_api_endpoints() {
 
     // 2. Test GET /api/info
     let info_res = client
-        .get(&format!("{base_url}/api/info"))
+        .get(format!("{base_url}/api/info"))
         .send()
         .await
         .unwrap();
@@ -66,7 +68,7 @@ async fn test_web_ui_and_api_endpoints() {
 
     // 3. Test GET /api/qr returns SVG XML
     let qr_res = client
-        .get(&format!("{base_url}/api/qr"))
+        .get(format!("{base_url}/api/qr"))
         .send()
         .await
         .unwrap();
@@ -77,7 +79,7 @@ async fn test_web_ui_and_api_endpoints() {
 
     // 4. Test POST /api/settings updates config
     let update_res = client
-        .post(&format!("{base_url}/api/settings"))
+        .post(format!("{base_url}/api/settings"))
         .json(&serde_json::json!({
             "name": "Renamed Node",
             "auto_accept_trusted": true,
@@ -90,7 +92,7 @@ async fn test_web_ui_and_api_endpoints() {
 
     // Verify changed settings in /api/info
     let info_res2 = client
-        .get(&format!("{base_url}/api/info"))
+        .get(format!("{base_url}/api/info"))
         .send()
         .await
         .unwrap();

@@ -95,11 +95,21 @@ pub fn sanitize_filename(raw_name: &str) -> String {
     clean
 }
 
-/// Resolves duplicate files in destination directory by appending ` (1)`, ` (2)`, etc.
-pub fn resolve_destination_path(dir: &Path, filename: &str) -> PathBuf {
+/// Resolves destination path in target directory:
+/// - Reuses existing file if it is an incomplete partial transfer (< expected_size) to allow resume.
+/// - Otherwise resolves duplicate files by appending ` (1)`, ` (2)`, etc.
+pub fn resolve_destination_path(dir: &Path, filename: &str, expected_size: u64) -> PathBuf {
     let clean_name = sanitize_filename(filename);
     let target = dir.join(&clean_name);
     if !target.exists() {
+        return target;
+    }
+
+    // If existing file is partial (< expected_size), reuse it to allow resume
+    if let Ok(m) = target.metadata()
+        && expected_size > 0
+        && m.len() < expected_size
+    {
         return target;
     }
 
@@ -160,11 +170,16 @@ mod tests {
         let initial_file = temp_dir.join("test.txt");
         std::fs::write(&initial_file, "hello").unwrap();
 
-        let candidate = resolve_destination_path(&temp_dir, "test.txt");
+        // When expected_size <= existing size (5 bytes), it renames to test (1).txt
+        let candidate = resolve_destination_path(&temp_dir, "test.txt", 5);
         assert_eq!(candidate, temp_dir.join("test (1).txt"));
 
+        // When expected_size > existing size (e.g. 100 bytes), it reuses test.txt for resume
+        let resumable = resolve_destination_path(&temp_dir, "test.txt", 100);
+        assert_eq!(resumable, temp_dir.join("test.txt"));
+
         std::fs::write(&candidate, "hello 2").unwrap();
-        let candidate2 = resolve_destination_path(&temp_dir, "test.txt");
+        let candidate2 = resolve_destination_path(&temp_dir, "test.txt", 5);
         assert_eq!(candidate2, temp_dir.join("test (2).txt"));
 
         let _ = std::fs::remove_dir_all(&temp_dir);

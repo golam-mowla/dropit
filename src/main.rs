@@ -165,8 +165,7 @@ async fn handle_send_command(
         let blake3_hash = if verify_hash {
             print!("⏳ Hashing {}...", filename);
             let _ = std::io::stdout().flush();
-            let data = tokio::fs::read(path).await?;
-            let h = blake3::hash(&data).to_hex().to_string();
+            let h = crypto::hash_file_streaming(path).await?;
             println!(" Done ({})", &h[..8]);
             Some(h)
         } else {
@@ -295,32 +294,36 @@ async fn handle_send_command(
     println!("✅ Offer accepted! Streaming files directly disk -> socket...");
 
     let total_start = std::time::Instant::now();
+    let items: Vec<(FileMetadata, PathBuf)> = meta_list.iter().cloned().zip(file_paths).collect();
 
-    for (idx, meta) in meta_list.iter().enumerate() {
-        let file_path = &file_paths[idx];
-        println!(
-            "\n📤 [{}/{}] Streaming: {}",
-            idx + 1,
-            meta_list.len(),
-            meta.filename
-        );
-
-        let upload_res = client
-            .stream_file(
-                &host_port,
-                &session_id,
-                &session_token,
-                meta,
-                file_path,
-                |p| {
-                    let pct = if p.total_bytes > 0 {
-                        (p.bytes_transferred as f64 / p.total_bytes as f64) * 100.0
-                    } else {
-                        100.0
-                    };
-                    let eta_str = p.eta_secs.map(|s| format!("{s}s")).unwrap_or_else(|| "--".into());
+    let client = Arc::new(client);
+    let results = client
+        .send_files_smart(
+            host_port.clone(),
+            session_id.clone(),
+            session_token.clone(),
+            items,
+            |p| {
+                let pct = if p.total_bytes > 0 {
+                    (p.bytes_transferred as f64 / p.total_bytes as f64) * 100.0
+                } else {
+                    100.0
+                };
+                let eta_str = p
+                    .eta_secs
+                    .map(|s| format!("{s}s"))
+                    .unwrap_or_else(|| "--".into());
+                if p.completed {
+                    println!(
+                        "\n   ✔️ [{}] 100% | {:>6.2} MB/s | {:>6.1} MB",
+                        p.filename,
+                        p.speed_mb_s,
+                        p.total_bytes as f64 / (1024.0 * 1024.0)
+                    );
+                } else {
                     print!(
-                        "\r   Progress: {:>5.1}% | {:>6.2} MB/s | ETA: {:>4} | {:>6.1} / {:>6.1} MB",
+                        "\r   [{}] {:>5.1}% | {:>6.2} MB/s | ETA: {:>4} | {:>6.1} / {:>6.1} MB   ",
+                        p.filename,
                         pct,
                         p.speed_mb_s,
                         eta_str,
@@ -328,14 +331,20 @@ async fn handle_send_command(
                         p.total_bytes as f64 / (1024.0 * 1024.0)
                     );
                     let _ = std::io::stdout().flush();
-                },
-            )
-            .await?;
+                }
+            },
+        )
+        .await?;
 
+    for res in results {
         println!(
-            "\n   ✔️ Completed (blake3: {}, verified: {})",
-            &upload_res.blake3_hash[..8],
-            upload_res.verified
+            "   ✔️ Verified: {} (blake3: {})",
+            res.verified,
+            if res.blake3_hash.len() >= 8 {
+                &res.blake3_hash[..8]
+            } else {
+                &res.blake3_hash
+            }
         );
     }
 

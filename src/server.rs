@@ -23,11 +23,12 @@ use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::convert::Infallible;
+use std::io::SeekFrom;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::fs::File;
-use tokio::io::AsyncWriteExt;
+use tokio::fs::{File, OpenOptions};
+use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 use tokio::sync::{RwLock, broadcast, mpsc, oneshot};
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::{error, info, warn};
@@ -124,7 +125,12 @@ pub async fn build_router(state: ServerState) -> Router {
         .route("/api/settings", post(handle_post_settings))
         .route("/api/web_send", post(handle_post_web_send))
         .route("/api/offer", post(handle_post_offer))
-        .route("/api/upload/{session_id}/{file_id}", put(handle_put_upload))
+        .route(
+            "/api/upload/{session_id}/{file_id}",
+            put(handle_put_upload)
+                .head(handle_get_upload_status)
+                .get(handle_get_upload_status),
+        )
         .with_state(state)
 }
 
@@ -592,7 +598,7 @@ async fn handle_post_offer(
 
     let mut dest_paths = HashMap::new();
     for file in &offer.files {
-        let safe_dest = resolve_destination_path(&download_dir, &file.filename);
+        let safe_dest = resolve_destination_path(&download_dir, &file.filename, file.size_bytes);
         dest_paths.insert(file.file_id.clone(), safe_dest);
     }
 
@@ -619,6 +625,93 @@ async fn handle_post_offer(
         pairing_code,
         reason: None,
     }))
+}
+
+fn parse_range_start(headers: &HeaderMap) -> Option<u64> {
+    for header_name in &[&header::CONTENT_RANGE, &header::RANGE] {
+        if let Some(val) = headers.get(*header_name).and_then(|h| h.to_str().ok()) {
+            let trimmed = val.trim();
+            let after_bytes = if let Some(s) = trimmed.strip_prefix("bytes=") {
+                Some(s)
+            } else {
+                trimmed.strip_prefix("bytes ")
+            };
+            if let Some(range_part) = after_bytes {
+                let start_str = range_part.split('-').next()?;
+                if let Ok(start) = start_str.trim().parse::<u64>() {
+                    return Some(start);
+                }
+            }
+        }
+    }
+    None
+}
+
+async fn handle_get_upload_status(
+    State(state): State<ServerState>,
+    AxumPath((session_id, file_id)): AxumPath<(String, String)>,
+    axum::extract::ConnectInfo(peer_addr): axum::extract::ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    if !is_private_or_loopback_ip(&peer_addr.ip()) {
+        return Err((
+            StatusCode::FORBIDDEN,
+            "Access denied: Private network only".into(),
+        ));
+    }
+
+    let auth_header = headers
+        .get("Authorization")
+        .and_then(|h| h.to_str().ok())
+        .and_then(|h| h.strip_prefix("Bearer "))
+        .ok_or_else(|| {
+            (
+                StatusCode::UNAUTHORIZED,
+                "Missing or invalid Authorization header".into(),
+            )
+        })?;
+
+    let dest_path = {
+        let sessions = state.active_sessions.read().await;
+        let session = sessions.get(&session_id).ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                format!("Session '{session_id}' not found or expired"),
+            )
+        })?;
+
+        if session.session_token != auth_header {
+            return Err((StatusCode::FORBIDDEN, "Invalid session token".into()));
+        }
+
+        session.dest_paths.get(&file_id).cloned().ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                format!("File id '{file_id}' not found in session"),
+            )
+        })?
+    };
+
+    let existing_bytes = if dest_path.exists() {
+        tokio::fs::metadata(&dest_path)
+            .await
+            .map(|m| m.len())
+            .unwrap_or(0)
+    } else {
+        0
+    };
+
+    let mut resp_headers = HeaderMap::new();
+    resp_headers.insert(
+        header::ACCEPT_RANGES,
+        header::HeaderValue::from_static("bytes"),
+    );
+    resp_headers.insert(
+        header::CONTENT_LENGTH,
+        header::HeaderValue::from(existing_bytes),
+    );
+
+    Ok((resp_headers, ""))
 }
 
 async fn handle_put_upload(
@@ -689,15 +782,62 @@ async fn handle_put_upload(
         )
     };
 
-    // 4. Stream socket -> disk in 1 MB buffer chunks (NEVER load whole files into RAM!)
-    let mut file = File::create(&dest_path).await.map_err(|err| {
-        error!("Failed to create destination file {:?}: {}", dest_path, err);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to create file: {err}"),
-        )
-    })?;
+    // 4. Check for HTTP Range resume
+    let range_start = parse_range_start(&headers).unwrap_or(0);
 
+    let mut file = if range_start > 0 {
+        let mut f = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&dest_path)
+            .await
+            .map_err(|err| {
+                error!(
+                    "Failed to open destination file for resume {:?}: {}",
+                    dest_path, err
+                );
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to open file for resume: {err}"),
+                )
+            })?;
+
+        let current_len = f.metadata().await.map(|m| m.len()).unwrap_or(0);
+        if range_start > current_len {
+            return Err((
+                StatusCode::RANGE_NOT_SATISFIABLE,
+                format!(
+                    "Requested range start {range_start} exceeds existing file size {current_len}"
+                ),
+            ));
+        }
+
+        f.seek(SeekFrom::Start(range_start)).await.map_err(|err| {
+            error!("Failed to seek destination file {:?}: {}", dest_path, err);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to seek file: {err}"),
+            )
+        })?;
+        f
+    } else {
+        OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&dest_path)
+            .await
+            .map_err(|err| {
+                error!("Failed to create destination file {:?}: {}", dest_path, err);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to create file: {err}"),
+                )
+            })?
+    };
+
+    // 5. Stream socket -> disk in 1 MB buffer chunks (NEVER load whole files into RAM!)
     let mut body_stream = body.into_data_stream();
     let mut hasher = blake3::Hasher::new();
     let mut bytes_written = 0u64;
@@ -711,7 +851,9 @@ async fn handle_put_upload(
             (StatusCode::BAD_REQUEST, format!("Streaming error: {err}"))
         })?;
 
-        hasher.update(&chunk);
+        if range_start == 0 {
+            hasher.update(&chunk);
+        }
         file.write_all(&chunk).await.map_err(|err| {
             error!("Disk write error on {:?}: {}", dest_path, err);
             (
@@ -729,8 +871,24 @@ async fn handle_put_upload(
             format!("Disk flush error: {err}"),
         )
     })?;
+    drop(file);
 
-    let computed_hash = hasher.finalize().to_hex().to_string();
+    // 6. BLAKE3 hash computation & verification
+    let computed_hash = if range_start > 0 {
+        // Stream file on disk in 1 MB chunks to compute final BLAKE3 hash without buffering in RAM
+        crypto::hash_file_streaming(&dest_path)
+            .await
+            .map_err(|err| {
+                error!("Failed to hash resumed file {:?}: {}", dest_path, err);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to compute file hash: {err}"),
+                )
+            })?
+    } else {
+        hasher.finalize().to_hex().to_string()
+    };
+
     let verified = if let Some(ref expected) = expected_hash {
         expected.eq_ignore_ascii_case(&computed_hash)
     } else {
@@ -744,11 +902,14 @@ async fn handle_put_upload(
     }
 
     info!(
-        "Successfully received {:?} ({} bytes, blake3: {})",
-        dest_path, bytes_written, computed_hash
+        "Successfully received {:?} ({} bytes streamed, total: {}, blake3: {})",
+        dest_path,
+        bytes_written,
+        range_start + bytes_written,
+        computed_hash
     );
 
-    // 5. Update session & check completion
+    // 7. Update session & check completion
     let session_all_done = {
         let mut sessions = state.active_sessions.write().await;
         if let Some(session) = sessions.get_mut(&session_id) {
@@ -774,7 +935,7 @@ async fn handle_put_upload(
 
     Ok(Json(UploadResult {
         file_id,
-        bytes_written,
+        bytes_written: range_start + bytes_written,
         blake3_hash: computed_hash,
         verified,
     }))

@@ -172,6 +172,24 @@ pub fn hash_bytes(data: &[u8]) -> String {
     hash.to_hex().to_string()
 }
 
+/// Compute blake3 hash of a file on disk by streaming in 1 MB chunks without buffering whole file in RAM
+pub async fn hash_file_streaming(path: &Path) -> Result<String> {
+    use tokio::io::AsyncReadExt;
+    let mut file = tokio::fs::File::open(path)
+        .await
+        .with_context(|| format!("Failed to open file for streaming hash: {path:?}"))?;
+    let mut hasher = blake3::Hasher::new();
+    let mut buf = vec![0u8; 1024 * 1024]; // 1 MB buffer
+    loop {
+        let n = file.read(&mut buf).await?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    Ok(hasher.finalize().to_hex().to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
