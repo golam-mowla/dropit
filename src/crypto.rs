@@ -145,6 +145,27 @@ pub fn generate_pairing_code(fp1: &str, fp2: &str) -> String {
     format!("{num:04}")
 }
 
+/// Generates an ASCII/Unicode QR code suitable for printing directly into terminal stdout
+pub fn generate_qr_terminal(content: &str) -> Result<String> {
+    let code = qrcode::QrCode::new(content.as_bytes()).context("Failed to generate QR code")?;
+    let render = code
+        .render::<qrcode::render::unicode::Dense1x2>()
+        .dark_color(qrcode::render::unicode::Dense1x2::Dark)
+        .light_color(qrcode::render::unicode::Dense1x2::Light)
+        .build();
+    Ok(render)
+}
+
+/// Generates an SVG XML string representing a QR code
+pub fn generate_qr_svg(content: &str) -> Result<String> {
+    let code = qrcode::QrCode::new(content.as_bytes()).context("Failed to generate QR code")?;
+    let svg = code
+        .render::<qrcode::render::svg::Color>()
+        .min_dimensions(200, 200)
+        .build();
+    Ok(svg)
+}
+
 /// Compute blake3 hash of a byte slice
 pub fn hash_bytes(data: &[u8]) -> String {
     let hash = blake3::hash(data);

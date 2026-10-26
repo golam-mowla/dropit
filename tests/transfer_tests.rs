@@ -26,8 +26,12 @@ async fn test_secure_file_streaming_roundtrip() {
     let receiver_identity = TlsIdentity::generate_self_signed("Receiver Node").unwrap();
     let receiver_config_arc = Arc::new(RwLock::new(receiver_config));
 
-    let server_state =
-        ServerState::new(receiver_config_arc.clone(), receiver_identity.clone(), None);
+    let server_state = ServerState::new(
+        receiver_config_arc.clone(),
+        receiver_identity.clone(),
+        None,
+        None,
+    );
 
     // Pick an available port on loopback
     let bind_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();

@@ -1,30 +1,42 @@
+use crate::client::DropItClient;
 use crate::config::{DropItConfig, PeerTrustStatus};
 use crate::crypto::{self, TlsIdentity};
+use crate::discovery::PeerRegistry;
 use crate::security::{is_private_or_loopback_ip, resolve_destination_path};
-use crate::transfer::{ActiveSession, TransferOfferRequest, TransferOfferResponse, UploadResult};
+use crate::transfer::{
+    ActiveSession, FileMetadata, TransferOfferRequest, TransferOfferResponse, UploadResult,
+};
 use anyhow::{Context, Result};
 use axum::{
     Json, Router,
     body::Body,
-    extract::{Path as AxumPath, State},
-    http::{HeaderMap, StatusCode},
-    response::IntoResponse,
+    extract::{Multipart, Path as AxumPath, State},
+    http::{HeaderMap, StatusCode, header},
+    response::{
+        Html, IntoResponse,
+        sse::{Event, KeepAlive, Sse},
+    },
     routing::{get, post, put},
 };
 use axum_server::tls_rustls::RustlsConfig;
 use futures_util::StreamExt;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::convert::Infallible;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
-use tokio::sync::{RwLock, mpsc};
+use tokio::sync::{RwLock, broadcast, mpsc, oneshot};
+use tokio_stream::wrappers::ReceiverStream;
 use tracing::{error, info, warn};
 
 pub const BUFFER_SIZE: usize = 1024 * 1024; // 1 MB buffer chunk
 const MAX_CONCURRENT_SESSIONS: usize = 8;
 const SESSION_TTL: Duration = Duration::from_secs(300); // 5 minutes
+
+static EMBEDDED_UI: &str = include_str!("../ui/index.html");
 
 #[derive(Clone)]
 pub struct ServerState {
@@ -32,35 +44,85 @@ pub struct ServerState {
     pub identity: TlsIdentity,
     pub active_sessions: Arc<RwLock<HashMap<String, ActiveSession>>>,
     pub recent_offers: Arc<RwLock<HashMap<IpAddr, Instant>>>,
+    pub peer_registry: Option<PeerRegistry>,
     pub offer_prompt_tx: Option<mpsc::Sender<OfferDecisionRequest>>,
+    pub pending_web_decisions: Arc<RwLock<HashMap<String, oneshot::Sender<bool>>>>,
+    pub sse_broadcast_tx: broadcast::Sender<WebSseEvent>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(tag = "type", content = "data")]
+pub enum WebSseEvent {
+    Peers(serde_json::Value),
+    Offer {
+        decision_id: String,
+        sender_name: String,
+        sender_device_id: String,
+        sender_fingerprint: String,
+        pairing_code: String,
+        files: Vec<FileMetadata>,
+        total_bytes: u64,
+    },
+    Progress {
+        transfer_id: String,
+        percent: f64,
+        loaded: u64,
+        total: u64,
+        speed_mb_s: f64,
+    },
 }
 
 pub struct OfferDecisionRequest {
     pub offer: TransferOfferRequest,
     pub pairing_code: String,
     pub is_trusted: bool,
-    pub response_tx: tokio::sync::oneshot::Sender<bool>,
+    pub response_tx: oneshot::Sender<bool>,
+}
+
+#[derive(Deserialize)]
+pub struct DecisionPayload {
+    pub decision_id: String,
+    pub accepted: bool,
+}
+
+#[derive(Deserialize)]
+pub struct UpdateSettingsPayload {
+    pub name: Option<String>,
+    pub auto_accept_trusted: Option<bool>,
+    pub verify_hash: Option<bool>,
 }
 
 impl ServerState {
     pub fn new(
         config: Arc<RwLock<DropItConfig>>,
         identity: TlsIdentity,
+        peer_registry: Option<PeerRegistry>,
         offer_prompt_tx: Option<mpsc::Sender<OfferDecisionRequest>>,
     ) -> Self {
+        let (sse_broadcast_tx, _) = broadcast::channel(64);
         Self {
             config,
             identity,
             active_sessions: Arc::new(RwLock::new(HashMap::new())),
             recent_offers: Arc::new(RwLock::new(HashMap::new())),
+            peer_registry,
             offer_prompt_tx,
+            pending_web_decisions: Arc::new(RwLock::new(HashMap::new())),
+            sse_broadcast_tx,
         }
     }
 }
 
 pub async fn build_router(state: ServerState) -> Router {
     Router::new()
+        .route("/", get(handle_get_index))
         .route("/api/info", get(handle_get_info))
+        .route("/api/peers", get(handle_get_peers))
+        .route("/api/qr", get(handle_get_qr))
+        .route("/api/events", get(handle_get_events))
+        .route("/api/decision", post(handle_post_decision))
+        .route("/api/settings", post(handle_post_settings))
+        .route("/api/web_send", post(handle_post_web_send))
         .route("/api/offer", post(handle_post_offer))
         .route("/api/upload/{session_id}/{file_id}", put(handle_put_upload))
         .with_state(state)
@@ -69,7 +131,7 @@ pub async fn build_router(state: ServerState) -> Router {
 pub async fn run_server(
     state: ServerState,
     bind_addr: SocketAddr,
-    shutdown_rx: Option<tokio::sync::broadcast::Receiver<()>>,
+    shutdown_rx: Option<broadcast::Receiver<()>>,
 ) -> Result<()> {
     crypto::init_crypto_provider();
     let rustls_config = RustlsConfig::from_pem(
@@ -103,6 +165,10 @@ pub async fn run_server(
     Ok(())
 }
 
+async fn handle_get_index() -> impl IntoResponse {
+    Html(EMBEDDED_UI)
+}
+
 async fn handle_get_info(
     State(state): State<ServerState>,
     _headers: HeaderMap,
@@ -113,9 +179,268 @@ async fn handle_get_info(
         "name": config.device_name,
         "fingerprint": state.identity.fingerprint,
         "port": config.port,
+        "download_dir": config.download_dir.to_string_lossy(),
+        "auto_accept_trusted": config.auto_accept_trusted,
+        "verify_hash": config.verify_hash,
         "version": env!("CARGO_PKG_VERSION"),
     });
     Json(payload)
+}
+
+async fn handle_get_peers(State(state): State<ServerState>) -> impl IntoResponse {
+    let peer_list = if let Some(ref reg) = state.peer_registry {
+        reg.get_active_peer_infos().await
+    } else {
+        vec![]
+    };
+    Json(serde_json::json!({ "peers": peer_list }))
+}
+
+async fn handle_get_qr(State(state): State<ServerState>) -> impl IntoResponse {
+    let config = state.config.read().await;
+    let port = config.port;
+
+    // Detect primary local IPv4 address
+    let mut lan_ip = "127.0.0.1".to_string();
+    if let Ok(interfaces) = local_ip_address::list_afinet_netifas() {
+        for (_name, ip) in interfaces {
+            if let IpAddr::V4(ipv4) = ip
+                && !ipv4.is_loopback()
+                && !ipv4.is_link_local()
+            {
+                lan_ip = ipv4.to_string();
+                break;
+            }
+        }
+    }
+
+    let url = format!("https://{lan_ip}:{port}");
+    let svg = crypto::generate_qr_svg(&url).unwrap_or_else(|_| "<svg></svg>".into());
+
+    ([(header::CONTENT_TYPE, "image/svg+xml")], svg)
+}
+
+async fn handle_get_events(
+    State(state): State<ServerState>,
+) -> Sse<impl futures_util::Stream<Item = Result<Event, Infallible>>> {
+    let (tx, rx) = mpsc::channel::<Result<Event, Infallible>>(32);
+
+    // Initial peers snapshot
+    if let Some(ref reg) = state.peer_registry {
+        let peers = reg.get_active_peer_infos().await;
+        if let Ok(json_str) = serde_json::to_string(&peers) {
+            let _ = tx
+                .send(Ok(Event::default().event("peers").data(json_str)))
+                .await;
+        }
+    }
+
+    // Subscribe to SSE broadcast
+    let mut sse_rx = state.sse_broadcast_tx.subscribe();
+    let tx_clone = tx.clone();
+    tokio::spawn(async move {
+        while let Ok(evt) = sse_rx.recv().await {
+            let event = match evt {
+                WebSseEvent::Peers(val) => Event::default().event("peers").data(val.to_string()),
+                WebSseEvent::Offer {
+                    decision_id,
+                    sender_name,
+                    sender_device_id,
+                    sender_fingerprint,
+                    pairing_code,
+                    files,
+                    total_bytes,
+                } => {
+                    let json = serde_json::json!({
+                        "decision_id": decision_id,
+                        "sender_name": sender_name,
+                        "sender_device_id": sender_device_id,
+                        "sender_fingerprint": sender_fingerprint,
+                        "pairing_code": pairing_code,
+                        "files": files,
+                        "total_bytes": total_bytes,
+                    });
+                    Event::default().event("offer").data(json.to_string())
+                }
+                WebSseEvent::Progress {
+                    transfer_id,
+                    percent,
+                    loaded,
+                    total,
+                    speed_mb_s,
+                } => {
+                    let json = serde_json::json!({
+                        "transfer_id": transfer_id,
+                        "percent": percent,
+                        "loaded": loaded,
+                        "total": total,
+                        "speed_mb_s": speed_mb_s,
+                    });
+                    Event::default().event("progress").data(json.to_string())
+                }
+            };
+            if tx_clone.send(Ok(event)).await.is_err() {
+                break;
+            }
+        }
+    });
+
+    // Also pipe registry updates if available
+    if let Some(ref reg) = state.peer_registry {
+        let mut reg_rx = reg.subscribe();
+        let reg_ref = reg.clone();
+        let tx_reg = tx.clone();
+        tokio::spawn(async move {
+            while let Ok(_evt) = reg_rx.recv().await {
+                let peers = reg_ref.get_active_peer_infos().await;
+                if let Ok(json_str) = serde_json::to_string(&peers) {
+                    let event = Event::default().event("peers").data(json_str);
+                    if tx_reg.send(Ok(event)).await.is_err() {
+                        break;
+                    }
+                }
+            }
+        });
+    }
+
+    Sse::new(ReceiverStream::new(rx)).keep_alive(KeepAlive::default())
+}
+
+async fn handle_post_decision(
+    State(state): State<ServerState>,
+    Json(payload): Json<DecisionPayload>,
+) -> impl IntoResponse {
+    let mut pending = state.pending_web_decisions.write().await;
+    if let Some(tx) = pending.remove(&payload.decision_id) {
+        let _ = tx.send(payload.accepted);
+        (StatusCode::OK, Json(serde_json::json!({ "status": "ok" })))
+    } else {
+        (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "status": "expired_or_not_found" })),
+        )
+    }
+}
+
+async fn handle_post_settings(
+    State(state): State<ServerState>,
+    Json(payload): Json<UpdateSettingsPayload>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let mut config = state.config.write().await;
+    if let Some(name) = payload.name
+        && !name.trim().is_empty()
+    {
+        config.device_name = name.trim().to_string();
+    }
+    if let Some(auto) = payload.auto_accept_trusted {
+        config.auto_accept_trusted = auto;
+    }
+    if let Some(vh) = payload.verify_hash {
+        config.verify_hash = vh;
+    }
+    config
+        .save()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(Json(serde_json::json!({ "success": true })))
+}
+
+async fn handle_post_web_send(
+    State(state): State<ServerState>,
+    mut multipart: Multipart,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let mut target = String::new();
+    let mut temp_files = Vec::new();
+    let temp_dir = std::env::temp_dir().join(format!("dropit_web_{}", rand::random::<u32>()));
+    let _ = tokio::fs::create_dir_all(&temp_dir).await;
+
+    while let Ok(Some(field)) = multipart.next_field().await {
+        let name = field.name().unwrap_or_default().to_string();
+        if name == "target" {
+            target = field.text().await.unwrap_or_default();
+        } else if name == "files" {
+            let filename = field.file_name().unwrap_or("file.bin").to_string();
+            let dest = temp_dir.join(&filename);
+            let mut f = File::create(&dest)
+                .await
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+            let data = field
+                .bytes()
+                .await
+                .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+            f.write_all(&data)
+                .await
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+            temp_files.push((dest, filename, data.len() as u64));
+        }
+    }
+
+    if target.is_empty() || temp_files.is_empty() {
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+        return Err((StatusCode::BAD_REQUEST, "Target and files required".into()));
+    }
+
+    // Initiate transfer to target device via DropItClient
+    let client = DropItClient::new();
+    let (local_device_id, local_name) = {
+        let cfg = state.config.read().await;
+        (cfg.device_id.clone(), cfg.device_name.clone())
+    };
+
+    let session_id = hex::encode(rand::random::<[u8; 16]>());
+    let mut file_metas = Vec::new();
+
+    for (idx, (path, name, size)) in temp_files.iter().enumerate() {
+        let hash = blake3::hash(&tokio::fs::read(path).await.unwrap_or_default())
+            .to_hex()
+            .to_string();
+        file_metas.push(FileMetadata {
+            file_id: idx.to_string(),
+            filename: name.clone(),
+            size_bytes: *size,
+            blake3_hash: Some(hash),
+        });
+    }
+
+    let offer_req = TransferOfferRequest {
+        session_id: session_id.clone(),
+        sender_name: local_name,
+        sender_device_id: local_device_id,
+        sender_fingerprint: state.identity.fingerprint.clone(),
+        files: file_metas.clone(),
+    };
+
+    let offer_resp = client
+        .send_offer(&target, &offer_req)
+        .await
+        .map_err(|e| (StatusCode::BAD_GATEWAY, e.to_string()))?;
+
+    if !offer_resp.accepted {
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+        return Err((
+            StatusCode::FORBIDDEN,
+            "Transfer declined by target device".into(),
+        ));
+    }
+
+    let token = offer_resp
+        .session_token
+        .ok_or_else(|| (StatusCode::BAD_GATEWAY, "Missing session token".into()))?;
+
+    for (idx, meta) in file_metas.iter().enumerate() {
+        let (file_path, _, _) = &temp_files[idx];
+        client
+            .stream_file(&target, &session_id, &token, meta, file_path, |_p| {})
+            .await
+            .map_err(|e| (StatusCode::BAD_GATEWAY, e.to_string()))?;
+    }
+
+    let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+
+    Ok(Json(serde_json::json!({
+        "success": true,
+        "files_sent": file_metas.len(),
+    })))
 }
 
 async fn handle_post_offer(
@@ -188,32 +513,67 @@ async fn handle_post_offer(
         PeerTrustStatus::Untrusted => false,
     };
 
-    // 6. Acceptance decision
+    // 6. Acceptance decision: Auto-accept > Web UI prompt > CLI prompt
+    let has_web_client = state.sse_broadcast_tx.receiver_count() > 0;
+    let has_cli_prompt = state.offer_prompt_tx.is_some();
+
     let accepted = if is_trusted && config.auto_accept_trusted {
         info!(
             "Auto-accepted transfer offer from trusted peer '{}'",
             offer.sender_name
         );
         true
-    } else if let Some(ref prompt_tx) = state.offer_prompt_tx {
-        let (res_tx, res_rx) = tokio::sync::oneshot::channel();
-        let prompt_req = OfferDecisionRequest {
-            offer: offer.clone(),
+    } else if !has_web_client && !has_cli_prompt {
+        config.auto_accept_trusted
+    } else {
+        // Broadcast offer to Web UI via SSE
+        let decision_id = hex::encode(rand::random::<[u8; 8]>());
+        let (web_tx, web_rx) = oneshot::channel();
+        let total_bytes: u64 = offer.files.iter().map(|f| f.size_bytes).sum();
+
+        {
+            let mut pending = state.pending_web_decisions.write().await;
+            pending.insert(decision_id.clone(), web_tx);
+        }
+
+        let _ = state.sse_broadcast_tx.send(WebSseEvent::Offer {
+            decision_id: decision_id.clone(),
+            sender_name: offer.sender_name.clone(),
+            sender_device_id: offer.sender_device_id.clone(),
+            sender_fingerprint: offer.sender_fingerprint.clone(),
             pairing_code: pairing_code.clone(),
-            is_trusted,
-            response_tx: res_tx,
-        };
-        if prompt_tx.send(prompt_req).await.is_err() {
-            false
+            files: offer.files.clone(),
+            total_bytes,
+        });
+
+        // If CLI receiver prompt channel is registered, run both in select
+        if let Some(ref prompt_tx) = state.offer_prompt_tx {
+            let (cli_tx, cli_rx) = oneshot::channel();
+            let prompt_req = OfferDecisionRequest {
+                offer: offer.clone(),
+                pairing_code: pairing_code.clone(),
+                is_trusted,
+                response_tx: cli_tx,
+            };
+            let _ = prompt_tx.send(prompt_req).await;
+
+            tokio::select! {
+                web_res = web_rx => {
+                    web_res.unwrap_or(false)
+                }
+                cli_res = cli_rx => {
+                    cli_res.unwrap_or(false)
+                }
+                _ = tokio::time::sleep(Duration::from_secs(60)) => {
+                    false
+                }
+            }
         } else {
-            tokio::time::timeout(Duration::from_secs(60), res_rx)
+            tokio::time::timeout(Duration::from_secs(60), web_rx)
                 .await
                 .unwrap_or(Ok(false))
                 .unwrap_or(false)
         }
-    } else {
-        // Fallback default: accept if receiver mode was started with auto-accept
-        config.auto_accept_trusted
     };
 
     if !accepted {

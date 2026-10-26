@@ -360,14 +360,48 @@ async fn handle_receive_command(
     identity: TlsIdentity,
     announcement: DeviceAnnouncement,
 ) -> Result<()> {
-    println!("📥 Mode: Receive / TLS 1.3 Server");
-    println!("🌐 Port: {}", config.port);
-    println!("📂 Save Path: {:?}", config.download_dir);
+    println!("📥 Mode: Receive / TLS 1.3 Server & Web UI");
+    println!("🌐 Server Port: {}", config.port);
+    println!("📂 Save Path   : {:?}", config.download_dir);
+
+    // Detect primary local IPv4 address
+    let mut lan_ip = "127.0.0.1".to_string();
+    if let Ok(interfaces) = local_ip_address::list_afinet_netifas() {
+        for (_name, ip) in interfaces {
+            if let std::net::IpAddr::V4(ipv4) = ip
+                && !ipv4.is_loopback()
+                && !ipv4.is_link_local()
+            {
+                lan_ip = ipv4.to_string();
+                break;
+            }
+        }
+    }
+
+    let local_url = format!("https://{lan_ip}:{}", config.port);
+    println!("\n📱 Open Web UI in browser: {local_url}");
+
+    // Render terminal QR code
+    if let Ok(qr_str) = crypto::generate_qr_terminal(&local_url) {
+        println!("\nScan with your phone to open the Web UI instantly:");
+        println!("{qr_str}");
+    }
 
     let config_arc = Arc::new(RwLock::new(config.clone()));
     let (prompt_tx, mut prompt_rx) = mpsc::channel::<OfferDecisionRequest>(16);
 
-    let server_state = ServerState::new(config_arc.clone(), identity.clone(), Some(prompt_tx));
+    // Start discovery
+    let registry = PeerRegistry::new();
+    let mut event_rx = registry.subscribe();
+    let mut discovery = DiscoveryManager::new(announcement, registry.clone());
+    discovery.start().await?;
+
+    let server_state = ServerState::new(
+        config_arc.clone(),
+        identity.clone(),
+        Some(registry.clone()),
+        Some(prompt_tx),
+    );
 
     let bind_addr: SocketAddr = SocketAddr::new(
         std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
@@ -375,12 +409,6 @@ async fn handle_receive_command(
     );
 
     let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
-
-    // Start discovery
-    let registry = PeerRegistry::new();
-    let mut event_rx = registry.subscribe();
-    let mut discovery = DiscoveryManager::new(announcement, registry);
-    discovery.start().await?;
 
     // Start HTTP/TLS Server in background
     let server_handle = tokio::spawn(async move {

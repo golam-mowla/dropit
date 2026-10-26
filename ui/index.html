@@ -3,60 +3,807 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Drop It</title>
+  <title>Drop It - Local File Transfer</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236366F1' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3v12'/%3E%3Cpolyline points='7 10 12 15 17 10'/%3E%3Cpath d='M4 17a4 4 0 0 0 4 4h8a4 4 0 0 0 4-4v-2'/%3E%3C/svg%3E">
   <style>
     :root {
       --bg: #09090b;
+      --surface: #121215;
       --card: #18181b;
+      --border: #27272a;
       --accent: #6366f1;
+      --accent-hover: #4f46e5;
+      --accent-subtle: rgba(99, 102, 241, 0.12);
       --text: #f4f4f5;
-      --muted: #71717a;
+      --muted: #a1a1aa;
+      --success: #10b981;
+      --danger: #ef4444;
+      --shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.4);
     }
+    @media (prefers-color-scheme: light) {
+      :root:not([data-theme="dark"]) {
+        --bg: #f8fafc;
+        --surface: #ffffff;
+        --card: #ffffff;
+        --border: #e2e8f0;
+        --accent: #6366f1;
+        --accent-hover: #4f46e5;
+        --accent-subtle: rgba(99, 102, 241, 0.08);
+        --text: #0f172a;
+        --muted: #64748b;
+        --success: #10b981;
+        --danger: #ef4444;
+        --shadow: 0 4px 16px -2px rgba(15, 23, 42, 0.06);
+      }
+    }
+    :root[data-theme="light"] {
+      --bg: #f8fafc;
+      --surface: #ffffff;
+      --card: #ffffff;
+      --border: #e2e8f0;
+      --accent: #6366f1;
+      --accent-hover: #4f46e5;
+      --accent-subtle: rgba(99, 102, 241, 0.08);
+      --text: #0f172a;
+      --muted: #64748b;
+      --success: #10b981;
+      --danger: #ef4444;
+      --shadow: 0 4px 16px -2px rgba(15, 23, 42, 0.06);
+    }
+    :root[data-theme="dark"] {
+      --bg: #09090b;
+      --surface: #121215;
+      --card: #18181b;
+      --border: #27272a;
+      --accent: #6366f1;
+      --accent-hover: #4f46e5;
+      --accent-subtle: rgba(99, 102, 241, 0.12);
+      --text: #f4f4f5;
+      --muted: #a1a1aa;
+      --success: #10b981;
+      --danger: #ef4444;
+      --shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.4);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      margin: 0;
-      padding: 24px 16px;
       font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
       background: var(--bg);
       color: var(--text);
       display: flex;
-      flex-direction: column;
-      align-items: center;
+      justify-content: center;
       min-height: 100vh;
+      padding: 16px;
+      transition: background-color 150ms ease, color 150ms ease;
     }
-    .container {
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { transition: none !important; animation: none !important; }
+    }
+    .app {
       width: 100%;
       max-width: 720px;
       display: flex;
       flex-direction: column;
-      gap: 16px;
+      gap: 24px;
     }
     header {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      padding-bottom: 8px;
+      padding: 8px 0;
     }
-    h1 {
-      margin: 0;
-      font-size: 1.5rem;
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .logo {
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      background: var(--accent-subtle);
+      color: var(--accent);
+      display: grid;
+      place-items: center;
+    }
+    .title-group h1 {
+      font-size: 1.25rem;
       font-weight: 700;
       letter-spacing: -0.02em;
     }
-    .badge {
-      font-size: 0.85rem;
+    .device-pill {
+      font-size: 0.8rem;
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .pulse-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--success);
+    }
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    button {
+      font-family: inherit;
+      cursor: pointer;
+      border: none;
+      outline: none;
+      background: none;
+      border-radius: 12px;
+      min-height: 44px;
+      min-width: 44px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 150ms ease;
+    }
+    button:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+    .icon-btn {
+      color: var(--muted);
+      border: 1px solid var(--border);
+      background: var(--card);
+    }
+    .icon-btn:hover {
+      color: var(--text);
+      border-color: var(--accent);
+    }
+    .dropzone {
+      border: 2px dashed var(--border);
+      border-radius: 16px;
+      background: var(--surface);
+      padding: 40px 24px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 150ms ease;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      box-shadow: var(--shadow);
+    }
+    .dropzone:hover, .dropzone.dragover {
+      border-color: var(--accent);
+      background: var(--accent-subtle);
+    }
+    .drop-icon {
+      width: 48px;
+      height: 48px;
       color: var(--accent);
-      background: rgba(99, 102, 241, 0.12);
-      padding: 4px 10px;
+    }
+    .drop-text {
+      font-size: 1.05rem;
+      font-weight: 600;
+    }
+    .drop-hint {
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+    .selected-files {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 12px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .file-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.9rem;
+    }
+    .section-title {
+      font-size: 0.9rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+    .peers-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 12px;
+    }
+    .peer-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      cursor: pointer;
+      transition: all 150ms ease;
+      text-align: left;
+    }
+    .peer-card:hover {
+      border-color: var(--accent);
+      transform: translateY(-2px);
+      box-shadow: var(--shadow);
+    }
+    .peer-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .peer-name {
+      font-weight: 600;
+      font-size: 0.95rem;
+    }
+    .peer-ip {
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+    .empty-state {
+      font-size: 0.9rem;
+      color: var(--muted);
+      padding: 24px;
+      text-align: center;
+      background: var(--surface);
+      border-radius: 14px;
+      border: 1px dashed var(--border);
+    }
+    .transfers-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .transfer-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .progress-track {
+      width: 100%;
+      height: 6px;
+      background: var(--border);
       border-radius: 9999px;
+      overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%;
+      background: var(--accent);
+      width: 0%;
+      transition: width 150ms linear;
+    }
+    .transfer-meta {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.65);
+      backdrop-filter: blur(4px);
+      display: none;
+      place-items: center;
+      padding: 16px;
+      z-index: 100;
+    }
+    .modal-overlay.active { display: grid; }
+    .modal-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      width: 100%;
+      max-width: 440px;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      box-shadow: var(--shadow);
+    }
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .modal-title { font-size: 1.15rem; font-weight: 700; }
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .form-group label {
+      font-size: 0.85rem;
+      font-weight: 500;
+      color: var(--muted);
+    }
+    .form-input {
+      padding: 10px 14px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: var(--card);
+      color: var(--text);
+      font-size: 0.95rem;
+    }
+    .form-input:focus {
+      outline: 2px solid var(--accent);
+    }
+    .checkbox-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 0.9rem;
+      cursor: pointer;
+    }
+    .qr-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      padding: 16px;
+      background: var(--card);
+      border-radius: 12px;
+    }
+    .qr-box svg {
+      width: 180px;
+      height: 180px;
+      border-radius: 8px;
+    }
+    .pairing-box {
+      background: var(--accent-subtle);
+      border: 1px dashed var(--accent);
+      border-radius: 12px;
+      padding: 16px;
+      text-align: center;
+    }
+    .pairing-code {
+      font-size: 2rem;
+      font-weight: 800;
+      letter-spacing: 0.2em;
+      color: var(--accent);
+    }
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+      font-weight: 600;
+      padding: 10px 18px;
+    }
+    .btn-primary:hover { background: var(--accent-hover); }
+    .btn-secondary {
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-weight: 600;
+      padding: 10px 18px;
+    }
+    .btn-secondary:hover { background: var(--card); }
+    .btn-danger {
+      background: var(--danger);
+      color: #fff;
+      font-weight: 600;
+      padding: 10px 18px;
     }
   </style>
 </head>
 <body>
-  <div class="container">
+  <div class="app">
     <header>
-      <h1>Drop It</h1>
-      <span class="badge" id="device-name">Ready</span>
+      <div class="brand">
+        <div class="logo" aria-label="Drop It Logo">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 3v12"/><polyline points="7 10 12 15 17 10"/><path d="M4 17a4 4 0 0 0 4 4h8a4 4 0 0 0 4-4v-2"/>
+          </svg>
+        </div>
+        <div class="title-group">
+          <h1>Drop It</h1>
+          <div class="device-pill">
+            <span class="pulse-dot"></span>
+            <span id="local-name">Loading...</span>
+          </div>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button id="theme-btn" class="icon-btn" aria-label="Toggle theme">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+          </svg>
+        </button>
+        <button id="settings-btn" class="icon-btn" aria-label="Settings">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+          </svg>
+        </button>
+      </div>
     </header>
+
+    <!-- Drag and drop zone -->
+    <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="Drop files here or click to choose">
+      <input type="file" id="file-input" multiple style="display: none;">
+      <svg class="drop-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+      </svg>
+      <div class="drop-text">Drop files here or tap to choose</div>
+      <div class="drop-hint">Local WiFi network only • Zero size limits • No cloud</div>
+    </div>
+
+    <!-- Selected files preview -->
+    <div class="selected-files" id="selected-files" style="display: none;">
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <span style="font-weight: 600;" id="selected-count">0 files selected</span>
+        <button id="clear-files-btn" class="icon-btn" style="min-height: 32px; min-width: 32px; padding: 4px;">Clear</button>
+      </div>
+      <div id="selected-list" style="display: flex; flex-direction: column; gap: 4px;"></div>
+    </div>
+
+    <!-- Nearby devices section -->
+    <div>
+      <div class="section-title">Nearby Devices (Tap to Send)</div>
+      <div class="peers-grid" id="peers-grid"></div>
+      <div class="empty-state" id="peers-empty">Searching for nearby Drop It devices on your WiFi...</div>
+    </div>
+
+    <!-- Active transfers section -->
+    <div id="transfers-section" style="display: none;">
+      <div class="section-title">Transfers</div>
+      <div class="transfers-list" id="transfers-list"></div>
+    </div>
   </div>
+
+  <!-- Offer Prompt Modal -->
+  <div class="modal-overlay" id="offer-modal">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title">Incoming File Transfer</div>
+      </div>
+      <div>
+        <p><strong id="offer-sender">Device</strong> wants to send you:</p>
+        <p id="offer-files-summary" style="color: var(--muted); margin-top: 4px;">0 file(s)</p>
+      </div>
+      <div class="pairing-box">
+        <div style="font-size: 0.8rem; color: var(--muted); margin-bottom: 4px;">PAIRING CONFIRMATION CODE</div>
+        <div class="pairing-code" id="offer-pairing-code">----</div>
+        <div style="font-size: 0.75rem; color: var(--muted); margin-top: 4px;">Verify this matches sender's screen</div>
+      </div>
+      <div style="display: flex; gap: 10px; justify-content: flex-end;">
+        <button class="btn-secondary" id="decline-btn">Decline</button>
+        <button class="btn-primary" id="accept-btn">Accept</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings Modal -->
+  <div class="modal-overlay" id="settings-modal">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title">Settings & Connect Phone</div>
+        <button class="icon-btn" id="close-settings-btn" style="min-height: 36px; min-width: 36px;">✕</button>
+      </div>
+      <div class="qr-container">
+        <div style="font-size: 0.85rem; font-weight: 600;">Scan with Phone to Connect</div>
+        <div class="qr-box" id="qr-box"></div>
+        <div style="font-size: 0.75rem; color: var(--muted);" id="local-url-display">https://...</div>
+      </div>
+      <div class="form-group">
+        <label for="setting-name">Device Name</label>
+        <input type="text" id="setting-name" class="form-input">
+      </div>
+      <div class="form-group">
+        <label for="setting-dir">Download Directory</label>
+        <input type="text" id="setting-dir" class="form-input" readonly>
+      </div>
+      <label class="checkbox-row">
+        <input type="checkbox" id="setting-auto-accept">
+        <span>Auto-accept transfers from trusted devices</span>
+      </label>
+      <label class="checkbox-row">
+        <input type="checkbox" id="setting-verify-hash">
+        <span>Verify BLAKE3 hash on receive</span>
+      </label>
+      <div style="display: flex; justify-content: flex-end; gap: 8px;">
+        <button class="btn-primary" id="save-settings-btn">Save Settings</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let selectedFiles = [];
+    let currentOffer = null;
+    let localInfo = {};
+
+    const dropzone = document.getElementById('dropzone');
+    const fileInput = document.getElementById('file-input');
+    const selectedFilesDiv = document.getElementById('selected-files');
+    const selectedList = document.getElementById('selected-list');
+    const selectedCount = document.getElementById('selected-count');
+    const clearFilesBtn = document.getElementById('clear-files-btn');
+    const peersGrid = document.getElementById('peers-grid');
+    const peersEmpty = document.getElementById('peers-empty');
+    const transfersSection = document.getElementById('transfers-section');
+    const transfersList = document.getElementById('transfers-list');
+    const offerModal = document.getElementById('offer-modal');
+    const settingsModal = document.getElementById('settings-modal');
+
+    // Theme toggle
+    document.getElementById('theme-btn').addEventListener('click', () => {
+      const current = document.documentElement.getAttribute('data-theme') ||
+        (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+      const next = current === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', next);
+      localStorage.setItem('dropit_theme', next);
+    });
+    const savedTheme = localStorage.getItem('dropit_theme');
+    if (savedTheme) document.documentElement.setAttribute('data-theme', savedTheme);
+
+    // Dropzone events
+    dropzone.addEventListener('click', () => fileInput.click());
+    dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('dragover'); });
+    dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
+    dropzone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropzone.classList.remove('dragover');
+      if (e.dataTransfer.files.length) handleFilesChosen(e.dataTransfer.files);
+    });
+    fileInput.addEventListener('change', () => {
+      if (fileInput.files.length) handleFilesChosen(fileInput.files);
+    });
+
+    function handleFilesChosen(files) {
+      selectedFiles = Array.from(files);
+      selectedList.innerHTML = '';
+      let totalSize = 0;
+      selectedFiles.forEach(f => {
+        totalSize += f.size;
+        const row = document.createElement('div');
+        row.className = 'file-item';
+        row.innerHTML = `<span>📄 ${escapeHtml(f.name)}</span><span style="color:var(--muted);">${formatSize(f.size)}</span>`;
+        selectedList.appendChild(row);
+      });
+      selectedCount.innerText = `${selectedFiles.length} file(s) (${formatSize(totalSize)})`;
+      selectedFilesDiv.style.display = 'flex';
+    }
+
+    clearFilesBtn.addEventListener('click', () => {
+      selectedFiles = [];
+      fileInput.value = '';
+      selectedFilesDiv.style.display = 'none';
+    });
+
+    // Fetch initial device info & peers
+    async function init() {
+      try {
+        const res = await fetch('/api/info');
+        if (res.ok) {
+          localInfo = await res.json();
+          document.getElementById('local-name').innerText = localInfo.name || 'Drop It Node';
+          document.getElementById('setting-name').value = localInfo.name || '';
+          document.getElementById('setting-dir').value = localInfo.download_dir || '';
+          document.getElementById('setting-auto-accept').checked = !!localInfo.auto_accept_trusted;
+          document.getElementById('setting-verify-hash').checked = localInfo.verify_hash !== false;
+          
+          const localUrl = `https://${window.location.hostname}:${localInfo.port}`;
+          document.getElementById('local-url-display').innerText = localUrl;
+          loadQrCode();
+        }
+      } catch (e) {
+        console.error('Failed to fetch /api/info', e);
+      }
+      fetchPeers();
+      initEvents();
+    }
+
+    async function loadQrCode() {
+      try {
+        const res = await fetch('/api/qr');
+        if (res.ok) {
+          const svg = await res.text();
+          document.getElementById('qr-box').innerHTML = svg;
+        }
+      } catch (e) {}
+    }
+
+    async function fetchPeers() {
+      try {
+        const res = await fetch('/api/peers');
+        if (res.ok) {
+          const data = await res.json();
+          renderPeers(data.peers || []);
+        }
+      } catch (e) {}
+    }
+
+    function renderPeers(peers) {
+      peersGrid.innerHTML = '';
+      if (!peers.length) {
+        peersEmpty.style.display = 'block';
+        return;
+      }
+      peersEmpty.style.display = 'none';
+      peers.forEach(peer => {
+        const card = document.createElement('div');
+        card.className = 'peer-card';
+        card.innerHTML = `
+          <div class="peer-header">
+            <span class="peer-name">${escapeHtml(peer.name)}</span>
+            <span class="pulse-dot"></span>
+          </div>
+          <div class="peer-ip">${escapeHtml(peer.address)}:${peer.port}</div>
+          <div style="font-size:0.75rem; color:var(--muted);">${escapeHtml(peer.source)}</div>
+        `;
+        card.addEventListener('click', () => sendToPeer(peer));
+        peersGrid.appendChild(card);
+      });
+    }
+
+    async function sendToPeer(peer) {
+      if (!selectedFiles.length) {
+        alert('Please select or drop files first!');
+        fileInput.click();
+        return;
+      }
+      const target = `${peer.address}:${peer.port}`;
+      const transferId = 'tx_' + Math.random().toString(36).substring(2, 9);
+      createTransferItem(transferId, `Sending to ${peer.name}`);
+
+      const formData = new FormData();
+      formData.append('target', target);
+      selectedFiles.forEach(f => formData.append('files', f));
+
+      try {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', '/api/web_send');
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) {
+            const pct = (e.loaded / e.total) * 100;
+            updateTransferItem(transferId, pct, formatSize(e.loaded), formatSize(e.total));
+          }
+        };
+        xhr.onload = () => {
+          if (xhr.status === 200) {
+            completeTransferItem(transferId, 'Completed!');
+            clearFilesBtn.click();
+          } else {
+            failTransferItem(transferId, 'Transfer rejected or failed');
+          }
+        };
+        xhr.onerror = () => failTransferItem(transferId, 'Network error');
+        xhr.send(formData);
+      } catch (err) {
+        failTransferItem(transferId, err.message);
+      }
+    }
+
+    function createTransferItem(id, label) {
+      transfersSection.style.display = 'block';
+      const card = document.createElement('div');
+      card.className = 'transfer-card';
+      card.id = id;
+      card.innerHTML = `
+        <div style="display: flex; justify-content: space-between; font-weight: 600; font-size: 0.9rem;">
+          <span>${escapeHtml(label)}</span>
+          <span class="status-text">Starting...</span>
+        </div>
+        <div class="progress-track"><div class="progress-fill" style="width: 0%;"></div></div>
+        <div class="transfer-meta"><span>--</span><span>0%</span></div>
+      `;
+      transfersList.prepend(card);
+    }
+
+    function updateTransferItem(id, pct, loaded, total) {
+      const card = document.getElementById(id);
+      if (!card) return;
+      card.querySelector('.progress-fill').style.width = `${pct}%`;
+      card.querySelector('.status-text').innerText = `${pct.toFixed(0)}%`;
+      card.querySelector('.transfer-meta').innerHTML = `<span>${loaded} / ${total}</span><span>${pct.toFixed(1)}%</span>`;
+    }
+
+    function completeTransferItem(id, msg) {
+      const card = document.getElementById(id);
+      if (!card) return;
+      card.querySelector('.progress-fill').style.width = '100%';
+      card.querySelector('.status-text').innerText = '✔️ ' + msg;
+      card.querySelector('.status-text').style.color = 'var(--success)';
+    }
+
+    function failTransferItem(id, msg) {
+      const card = document.getElementById(id);
+      if (!card) return;
+      card.querySelector('.status-text').innerText = '❌ ' + msg;
+      card.querySelector('.status-text').style.color = 'var(--danger)';
+    }
+
+    // SSE Realtime Event Stream
+    function initEvents() {
+      const evt = new EventSource('/api/events');
+      evt.addEventListener('peers', (e) => {
+        try { renderPeers(JSON.parse(e.data)); } catch (err) {}
+      });
+      evt.addEventListener('offer', (e) => {
+        try {
+          currentOffer = JSON.parse(e.data);
+          document.getElementById('offer-sender').innerText = currentOffer.sender_name;
+          document.getElementById('offer-files-summary').innerText =
+            `${currentOffer.files.length} file(s) (${formatSize(currentOffer.total_bytes)})`;
+          document.getElementById('offer-pairing-code').innerText = currentOffer.pairing_code;
+          offerModal.classList.add('active');
+        } catch (err) {}
+      });
+      evt.addEventListener('progress', (e) => {
+        try {
+          const p = JSON.parse(e.data);
+          updateTransferItem(p.transfer_id, p.percent, formatSize(p.loaded), formatSize(p.total));
+        } catch (err) {}
+      });
+      evt.onerror = () => { setTimeout(fetchPeers, 2000); };
+    }
+
+    // Offer modal buttons
+    document.getElementById('accept-btn').addEventListener('click', async () => {
+      if (!currentOffer) return;
+      offerModal.classList.remove('active');
+      await sendDecision(currentOffer.decision_id, true);
+    });
+    document.getElementById('decline-btn').addEventListener('click', async () => {
+      if (!currentOffer) return;
+      offerModal.classList.remove('active');
+      await sendDecision(currentOffer.decision_id, false);
+    });
+    async function sendDecision(decisionId, accepted) {
+      try {
+        await fetch('/api/decision', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ decision_id: decisionId, accepted })
+        });
+      } catch (e) {}
+    }
+
+    // Settings Modal
+    document.getElementById('settings-btn').addEventListener('click', () => {
+      settingsModal.classList.add('active');
+    });
+    document.getElementById('close-settings-btn').addEventListener('click', () => {
+      settingsModal.classList.remove('active');
+    });
+    document.getElementById('save-settings-btn').addEventListener('click', async () => {
+      const name = document.getElementById('setting-name').value.trim();
+      const autoAccept = document.getElementById('setting-auto-accept').checked;
+      const verifyHash = document.getElementById('setting-verify-hash').checked;
+      try {
+        const res = await fetch('/api/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, auto_accept_trusted: autoAccept, verify_hash: verifyHash })
+        });
+        if (res.ok) {
+          settingsModal.classList.remove('active');
+          init();
+        }
+      } catch (e) {
+        alert('Failed to save settings: ' + e);
+      }
+    });
+
+    function formatSize(bytes) {
+      if (bytes === 0) return '0 B';
+      const k = 1024;
+      const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return (bytes / Math.pow(k, i)).toFixed(i === 0 ? 0 : 1) + ' ' + sizes[i];
+    }
+    function escapeHtml(str) {
+      return (str || '').replace(/[&<>"']/g, m => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      }[m]));
+    }
+
+    setInterval(fetchPeers, 3000);
+    window.addEventListener('DOMContentLoaded', init);
+  </script>
 </body>
 </html>

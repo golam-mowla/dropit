@@ -32,6 +32,7 @@ socket2 = "0.6.5"
 thiserror = "2.0"
 tokio = { version = "1.54", features = ["full"] }
 tokio-rustls = "0.26"
+tokio-stream = "0.1.19"
 tokio-util = { version = "0.7.20", features = ["io"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
