@@ -30,7 +30,7 @@ jobs:
         with:
           components: clippy
       - name: Run Clippy
-        run: cargo clippy -- -D warnings
+        run: cargo clippy --all-targets --all-features -- -D warnings
 
   test:
     name: Tests (${{ matrix.os }})
