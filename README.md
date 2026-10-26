@@ -1,11 +1,7 @@
 # Drop It for Windows
 
 <p align="center">
-  <svg width="72" height="72" viewBox="0 0 24 24" fill="none" stroke="#6366F1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M12 3v12" />
-    <path d="M8 11l4 4 4-4" />
-    <path d="M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" />
-  </svg>
+  <img src="assets/icon.png" width="96" height="96" alt="Drop It Logo" style="border-radius: 50%;">
   <br>
   <strong>Fast, lightweight, secure local WiFi file transfer tool for Windows (10/11 x64).</strong>
   <br>
@@ -17,6 +13,7 @@
   <a href="https://github.com/golam-mowla/dropit/releases"><img src="https://img.shields.io/github/v/release/golam-mowla/dropit?color=6366F1" alt="Release"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-6366F1.svg" alt="License: MIT"></a>
   <img src="https://img.shields.io/badge/Platform-Windows_10%20%7C%2011%20x64-blue.svg" alt="Windows Platform">
+  <img src="https://img.shields.io/badge/Author-Golam%20Mowla-indigo.svg" alt="Author">
   <img src="https://img.shields.io/badge/Rust-2024_Edition-orange.svg" alt="Rust Edition">
   <img src="https://img.shields.io/badge/Security_Audit-Passing-brightgreen.svg" alt="Audit">
 </p>
@@ -51,22 +48,25 @@ Measured on Windows across local WiFi / LAN connection (Release profile: `opt-le
 
 ---
 
-## 📦 Windows Download
+## 📦 Windows Downloads
 
-Single static binary ready to run with zero installation:
+Choose your preferred format:
 
-| Platform | Architecture | Binary Package |
-| :--- | :--- | :--- |
-| **Windows 10 / 11** | x86_64 (64-bit) | [`dropit-windows-x64.zip`](https://github.com/golam-mowla/dropit/releases/latest) |
+| Package | Type | Description | Link |
+| :--- | :--- | :--- | :--- |
+| **Drop It Setup (x64)** | **Installer (.exe)** | **Recommended.** 1-click installer with Start Menu & Desktop shortcuts, uninstaller | [**`dropit-setup-x64.exe`**](https://github.com/golam-mowla/dropit/releases/latest) |
+| **Drop It Portable (x64)** | **Zip Archive (.zip)** | Standalone static binary with embedded icon. Zero installation required. | [**`dropit-windows-x64.zip`**](https://github.com/golam-mowla/dropit/releases/latest) |
 
-Simply extract and double-click or run `dropit.exe` from PowerShell or Command Prompt.
+> 💡 **Quick Launch**: If using the portable `.exe`, simply double-click `dropit.exe`! Drop It will automatically start receiver mode and launch the Web UI in your default web browser.
 
 ---
 
 ## 🚀 2-Step Quick Start
 
 ### 1. Start Drop It
-Run Drop It on your Windows PC:
+- **If Installed**: Click the **Drop It** shortcut on your Desktop or Start Menu.
+- **Or via Portable Exe**: Double-click `dropit.exe`.
+- **Or via CLI**:
 ```powershell
 # Start receiver mode with Web UI & local discovery
 .\dropit.exe receive
@@ -137,6 +137,15 @@ cargo build --release
 
 ---
 
+## 👤 Author & Contributor
+
+**Drop It** is created and maintained by **[Golam Mowla](https://github.com/golam-mowla)**.
+
+- **GitHub Profile**: [@golam-mowla](https://github.com/golam-mowla)
+- **Repository**: [https://github.com/golam-mowla/dropit](https://github.com/golam-mowla/dropit)
+
+---
+
 ## 📄 License
 
-Released under the [MIT License](LICENSE).
+Released under the [MIT License](LICENSE). Copyright (c) 2026 Golam Mowla.

@@ -42,3 +42,18 @@ jobs:
           archive: dropit-windows-x64
           checksum: sha256
           token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress
+
+      - name: Build Windows Setup Installer
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DSourceExe="..\target\x86_64-pc-windows-msvc\release\dropit.exe" installer\dropit.iss
+          Get-FileHash target\installer\dropit-setup-x64.exe -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower())  dropit-setup-x64.exe" } | Set-Content target\installer\dropit-setup-x64.sha256
+
+      - name: Upload Windows Setup Installer to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            target/installer/dropit-setup-x64.exe
+            target/installer/dropit-setup-x64.sha256

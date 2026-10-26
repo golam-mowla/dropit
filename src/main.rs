@@ -16,9 +16,9 @@ use tracing_subscriber::EnvFilter;
 
 #[derive(Parser, Debug)]
 #[command(name = "dropit")]
-#[command(author = "DropIt Contributors")]
+#[command(author = "Golam Mowla <https://github.com/golam-mowla>")]
 #[command(version = "0.1.0")]
-#[command(about = "Fast, lightweight, secure local WiFi file transfer tool", long_about = None)]
+#[command(about = "Fast, lightweight, secure local WiFi file transfer tool for Windows", long_about = None)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
@@ -64,8 +64,35 @@ enum Commands {
     },
 }
 
+fn open_browser(url: &str) {
+    #[cfg(windows)]
+    {
+        let _ = std::process::Command::new("rundll32")
+            .args(["url.dll,FileProtocolHandler", url])
+            .spawn();
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = std::process::Command::new("xdg-open").arg(url).spawn();
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
+    if let Err(e) = run().await {
+        eprintln!("\n❌ Drop It Error: {:#}", e);
+        #[cfg(windows)]
+        {
+            println!("\nPress Enter to exit...");
+            let mut buf = String::new();
+            let _ = std::io::stdin().read_line(&mut buf);
+        }
+        std::process::exit(1);
+    }
+    Ok(())
+}
+
+async fn run() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn")),
@@ -121,11 +148,11 @@ async fn main() -> Result<()> {
         }
 
         None => {
-            println!(
-                "💡 Run `dropit receive` to wait for incoming transfers, or `dropit send <file>` to transfer."
-            );
-            println!("💡 Run `dropit discover` to scan for nearby devices.");
-            println!("💡 Run `dropit --help` for available options.");
+            println!("🚀 No subcommand provided — launching Drop It Web UI & Receiver server...");
+            let local_url = format!("https://127.0.0.1:{}", config.port);
+            println!("🌐 Opening Web UI in default browser: {}", local_url);
+            open_browser(&local_url);
+            handle_receive_command(config, identity, announcement).await?;
         }
     }
 

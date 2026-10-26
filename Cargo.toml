@@ -2,7 +2,7 @@
 name = "dropit"
 version = "0.1.0"
 edition = "2024"
-authors = ["DropIt Contributors"]
+authors = ["Golam Mowla <https://github.com/golam-mowla>"]
 description = "Fast, lightweight, secure local WiFi file transfer tool for Windows"
 license = "MIT"
 readme = "README.md"
@@ -43,3 +43,6 @@ lto = "fat"
 codegen-units = 1
 panic = "abort"
 strip = true
+
+[build-dependencies]
+winres = "0.1.12"
