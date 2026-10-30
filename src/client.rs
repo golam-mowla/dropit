@@ -64,6 +64,33 @@ impl DropItClient {
         Ok(info)
     }
 
+    pub async fn send_quick_message(
+        &self,
+        host_port: &str,
+        sender_id: &str,
+        sender_name: &str,
+        text: &str,
+    ) -> Result<()> {
+        let url = format!("https://{host_port}/api/message");
+        let payload = serde_json::json!({
+            "sender_id": sender_id,
+            "sender_name": sender_name,
+            "text": text,
+        });
+        let res = self
+            .client
+            .post(&url)
+            .json(&payload)
+            .send()
+            .await
+            .with_context(|| format!("Failed to send message to https://{host_port}"))?;
+
+        if !res.status().is_success() {
+            bail!("Failed to send message: HTTP {}", res.status());
+        }
+        Ok(())
+    }
+
     pub async fn send_offer(
         &self,
         host_port: &str,

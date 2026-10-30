@@ -33,6 +33,21 @@ pub struct DropItConfig {
     pub auto_accept_trusted: bool,
     pub verify_hash: bool,
     pub trusted_devices: HashMap<String, String>, // device_id -> sha256 fingerprint
+
+    #[serde(default)]
+    pub favorites: Vec<String>,
+    #[serde(default)]
+    pub nicknames: HashMap<String, String>,
+    #[serde(default = "default_true")]
+    pub minimize_to_tray: bool,
+    #[serde(default)]
+    pub run_on_startup: bool,
+    #[serde(default = "default_true")]
+    pub context_menu_enabled: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Default for DropItConfig {
@@ -51,6 +66,11 @@ impl Default for DropItConfig {
             auto_accept_trusted: false,
             verify_hash: true,
             trusted_devices: HashMap::new(),
+            favorites: Vec::new(),
+            nicknames: HashMap::new(),
+            minimize_to_tray: true,
+            run_on_startup: false,
+            context_menu_enabled: true,
         }
     }
 }
@@ -111,6 +131,38 @@ impl DropItConfig {
             let _ = fs::create_dir_all(&self.download_dir);
         }
         Ok(())
+    }
+
+    pub fn is_favorite(&self, id: &str) -> bool {
+        self.favorites.iter().any(|f| f == id)
+    }
+
+    pub fn toggle_favorite(&mut self, id: &str) -> Result<()> {
+        if let Some(pos) = self.favorites.iter().position(|f| f == id) {
+            self.favorites.remove(pos);
+        } else {
+            self.favorites.push(id.to_string());
+        }
+        self.save()
+    }
+
+    pub fn get_display_name<'a>(&'a self, id: &str, original_name: &'a str) -> &'a str {
+        if let Some(custom) = self.nicknames.get(id) {
+            if !custom.trim().is_empty() {
+                return custom.as_str();
+            }
+        }
+        original_name
+    }
+
+    pub fn set_nickname(&mut self, id: &str, nickname: &str) -> Result<()> {
+        let trimmed = nickname.trim();
+        if trimmed.is_empty() {
+            self.nicknames.remove(id);
+        } else {
+            self.nicknames.insert(id.to_string(), trimmed.to_string());
+        }
+        self.save()
     }
 
     pub fn trust_peer(&mut self, device_id: &str, fingerprint: &str) -> Result<()> {

@@ -16,14 +16,17 @@ base64 = "0.23.1"
 blake3 = "1.8"
 clap = { version = "4.6", features = ["derive"] }
 directories = "6.0"
+eframe = { version = "0.31", default-features = false, features = ["default_fonts", "glow"] }
 futures-util = "0.3.34"
 hex = "0.4"
+image = { version = "0.25", default-features = false, features = ["png"] }
 local-ip-address = "0.6"
 mdns-sd = "0.21"
 qrcode = "0.14"
 rand = "0.10"
 rcgen = "0.14"
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "stream", "json"] }
+rfd = "0.15"
 rustls = { version = "0.23", features = ["ring"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -36,6 +39,8 @@ tokio-stream = "0.1.19"
 tokio-util = { version = "0.7.20", features = ["io"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tray-icon = "0.20"
+winreg = "0.55"
 
 [profile.release]
 opt-level = 3

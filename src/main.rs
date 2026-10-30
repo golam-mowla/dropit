@@ -22,6 +22,14 @@ use tracing_subscriber::EnvFilter;
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
+
+    /// Start minimized directly in the Windows System Tray
+    #[arg(long, default_value_t = false)]
+    tray: bool,
+
+    /// Start minimized directly in the Windows System Tray
+    #[arg(long, default_value_t = false)]
+    minimized: bool,
 }
 
 #[derive(Subcommand, Debug)]
@@ -62,19 +70,6 @@ enum Commands {
         #[arg(short, long, default_value_t = 5)]
         timeout: u64,
     },
-}
-
-fn open_browser(url: &str) {
-    #[cfg(windows)]
-    {
-        let _ = std::process::Command::new("rundll32")
-            .args(["url.dll,FileProtocolHandler", url])
-            .spawn();
-    }
-    #[cfg(not(windows))]
-    {
-        let _ = std::process::Command::new("xdg-open").arg(url).spawn();
-    }
 }
 
 #[tokio::main]
@@ -148,11 +143,8 @@ async fn run() -> Result<()> {
         }
 
         None => {
-            println!("🚀 No subcommand provided — launching Drop It Web UI & Receiver server...");
-            let local_url = format!("https://127.0.0.1:{}", config.port);
-            println!("🌐 Opening Web UI in default browser: {}", local_url);
-            open_browser(&local_url);
-            handle_receive_command(config, identity, announcement).await?;
+            let start_in_tray = cli.tray || cli.minimized;
+            dropit::gui::run_gui_app(config, identity, start_in_tray).await?;
         }
     }
 

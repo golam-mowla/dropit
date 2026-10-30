@@ -74,6 +74,18 @@ pub enum WebSseEvent {
         total: u64,
         speed_mb_s: f64,
     },
+    Message {
+        sender_id: String,
+        sender_name: String,
+        text: String,
+    },
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug)]
+pub struct QuickMessagePayload {
+    pub sender_id: String,
+    pub sender_name: String,
+    pub text: String,
 }
 
 pub struct OfferDecisionRequest {
@@ -128,6 +140,7 @@ pub async fn build_router(state: ServerState) -> Router {
         .route("/api/settings", post(handle_post_settings))
         .route("/api/web_send", post(handle_post_web_send))
         .route("/api/offer", post(handle_post_offer))
+        .route("/api/message", post(handle_post_message))
         .route(
             "/api/upload/{session_id}/{file_id}",
             put(handle_put_upload)
@@ -306,6 +319,18 @@ async fn handle_get_events(
                     });
                     Event::default().event("progress").data(json.to_string())
                 }
+                WebSseEvent::Message {
+                    sender_id,
+                    sender_name,
+                    text,
+                } => {
+                    let json = serde_json::json!({
+                        "sender_id": sender_id,
+                        "sender_name": sender_name,
+                        "text": text,
+                    });
+                    Event::default().event("message").data(json.to_string())
+                }
             };
             if tx_clone.send(Ok(event)).await.is_err() {
                 break;
@@ -348,6 +373,18 @@ async fn handle_post_decision(
             Json(serde_json::json!({ "status": "expired_or_not_found" })),
         )
     }
+}
+
+async fn handle_post_message(
+    State(state): State<ServerState>,
+    Json(payload): Json<QuickMessagePayload>,
+) -> impl IntoResponse {
+    let _ = state.sse_broadcast_tx.send(WebSseEvent::Message {
+        sender_id: payload.sender_id,
+        sender_name: payload.sender_name,
+        text: payload.text,
+    });
+    StatusCode::OK
 }
 
 async fn handle_post_settings(
