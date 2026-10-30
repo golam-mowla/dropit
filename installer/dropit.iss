@@ -45,6 +45,7 @@ Name: "contextmenu"; Description: "Add 'Send with Drop It' to Windows Explorer r
 [Files]
 Source: "{#SourceExe}"; DestDir: "{app}"; DestName: "{#MyAppExeName}"; Flags: ignoreversion
 Source: "..\assets\icon.png"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\assets\libunwind.dll"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "..\README.md"; DestDir: "{app}"; Flags: isreadme ignoreversion
 
 [Icons]
