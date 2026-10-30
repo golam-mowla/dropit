@@ -93,9 +93,7 @@ pub fn open_file(path: &Path) {
 pub fn open_in_folder(path: &Path) {
     if path.is_file() {
         let arg = format!("/select,\"{}\"", path.display());
-        let _ = std::process::Command::new("explorer.exe")
-            .arg(arg)
-            .spawn();
+        let _ = std::process::Command::new("explorer.exe").arg(arg).spawn();
     } else {
         let _ = std::process::Command::new("explorer.exe")
             .arg(path.display().to_string())

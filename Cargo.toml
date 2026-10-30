@@ -8,6 +8,13 @@ license = "MIT"
 readme = "README.md"
 repository = "https://github.com/golam-mowla/dropit"
 
+[lints.clippy]
+collapsible_if = "allow"
+let_and_return = "allow"
+field_reassign_with_default = "allow"
+unneeded_wildcard_pattern = "allow"
+manual_unwrap_or_default = "allow"
+
 [dependencies]
 anyhow = "1.0"
 axum = { version = "0.8", features = ["multipart"] }

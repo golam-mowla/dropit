@@ -334,7 +334,9 @@ async fn handle_get_events(
                         "file_id": file_id,
                         "dest_path": dest_path,
                     });
-                    Event::default().event("file_completed").data(json.to_string())
+                    Event::default()
+                        .event("file_completed")
+                        .data(json.to_string())
                 }
                 WebSseEvent::Message {
                     sender_id,
@@ -964,7 +966,10 @@ async fn handle_put_upload(
     let mut last_progress_time = Instant::now();
     let mut session_current_loaded = {
         let sessions = state.active_sessions.read().await;
-        sessions.get(&session_id).map(|s| s.received_bytes).unwrap_or(0)
+        sessions
+            .get(&session_id)
+            .map(|s| s.received_bytes)
+            .unwrap_or(0)
     };
 
     while let Some(chunk_res) = body_stream.next().await {
@@ -1000,7 +1005,8 @@ async fn handle_put_upload(
                 0.0
             };
             let percent = if session_total_bytes > 0 {
-                ((session_current_loaded as f64 / session_total_bytes as f64) * 100.0).clamp(0.0, 99.9)
+                ((session_current_loaded as f64 / session_total_bytes as f64) * 100.0)
+                    .clamp(0.0, 99.9)
             } else {
                 50.0
             };
