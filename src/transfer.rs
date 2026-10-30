@@ -58,6 +58,8 @@ pub struct ActiveSession {
     pub files: Vec<FileMetadata>,
     pub dest_paths: HashMap<String, PathBuf>, // file_id -> destination path
     pub completed_files: HashSet<String>,
+    pub total_bytes: u64,
+    pub received_bytes: u64,
     pub created_at: Instant,
 }
 

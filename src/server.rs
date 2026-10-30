@@ -74,6 +74,11 @@ pub enum WebSseEvent {
         total: u64,
         speed_mb_s: f64,
     },
+    FileCompleted {
+        session_id: String,
+        file_id: String,
+        dest_path: String,
+    },
     Message {
         sender_id: String,
         sender_name: String,
@@ -318,6 +323,18 @@ async fn handle_get_events(
                         "speed_mb_s": speed_mb_s,
                     });
                     Event::default().event("progress").data(json.to_string())
+                }
+                WebSseEvent::FileCompleted {
+                    session_id,
+                    file_id,
+                    dest_path,
+                } => {
+                    let json = serde_json::json!({
+                        "session_id": session_id,
+                        "file_id": file_id,
+                        "dest_path": dest_path,
+                    });
+                    Event::default().event("file_completed").data(json.to_string())
                 }
                 WebSseEvent::Message {
                     sender_id,
@@ -686,6 +703,7 @@ async fn handle_post_offer(
         dest_paths.insert(file.file_id.clone(), safe_dest);
     }
 
+    let total_offer_bytes: u64 = offer.files.iter().map(|f| f.size_bytes).sum();
     let active_session = ActiveSession {
         session_id: offer.session_id.clone(),
         session_token: session_token.clone(),
@@ -695,6 +713,8 @@ async fn handle_post_offer(
         files: offer.files.clone(),
         dest_paths,
         completed_files: HashSet::new(),
+        total_bytes: total_offer_bytes,
+        received_bytes: 0,
         created_at: Instant::now(),
     };
 
@@ -833,7 +853,7 @@ async fn handle_put_upload(
         })?;
 
     // 3. Session lookup & verification
-    let (dest_path, expected_hash, sender_device_id, sender_fingerprint) = {
+    let (dest_path, expected_hash, sender_device_id, sender_fingerprint, session_total_bytes) = {
         let sessions = state.active_sessions.read().await;
         let session = sessions.get(&session_id).ok_or_else(|| {
             (
@@ -877,6 +897,7 @@ async fn handle_put_upload(
             meta.blake3_hash,
             session.sender_device_id.clone(),
             session.sender_fingerprint.clone(),
+            session.total_bytes,
         )
     };
 
@@ -939,6 +960,12 @@ async fn handle_put_upload(
     let mut body_stream = body.into_data_stream();
     let mut hasher = blake3::Hasher::new();
     let mut bytes_written = 0u64;
+    let stream_start = Instant::now();
+    let mut last_progress_time = Instant::now();
+    let mut session_current_loaded = {
+        let sessions = state.active_sessions.read().await;
+        sessions.get(&session_id).map(|s| s.received_bytes).unwrap_or(0)
+    };
 
     while let Some(chunk_res) = body_stream.next().await {
         let chunk = chunk_res.map_err(|err| {
@@ -960,7 +987,32 @@ async fn handle_put_upload(
             )
         })?;
 
-        bytes_written += chunk.len() as u64;
+        let chunk_len = chunk.len() as u64;
+        bytes_written += chunk_len;
+        session_current_loaded += chunk_len;
+
+        if last_progress_time.elapsed() >= Duration::from_millis(80) {
+            last_progress_time = Instant::now();
+            let elapsed_secs = stream_start.elapsed().as_secs_f64();
+            let speed_mb_s = if elapsed_secs > 0.05 {
+                (bytes_written as f64 / (1024.0 * 1024.0)) / elapsed_secs
+            } else {
+                0.0
+            };
+            let percent = if session_total_bytes > 0 {
+                ((session_current_loaded as f64 / session_total_bytes as f64) * 100.0).clamp(0.0, 99.9)
+            } else {
+                50.0
+            };
+
+            let _ = state.sse_broadcast_tx.send(WebSseEvent::Progress {
+                transfer_id: session_id.clone(),
+                percent,
+                loaded: session_current_loaded,
+                total: session_total_bytes,
+                speed_mb_s,
+            });
+        }
     }
 
     file.flush().await.map_err(|err| {
@@ -1008,15 +1060,36 @@ async fn handle_put_upload(
     );
 
     // 7. Update session & check completion
-    let session_all_done = {
+    let (session_all_done, final_loaded, final_total) = {
         let mut sessions = state.active_sessions.write().await;
         if let Some(session) = sessions.get_mut(&session_id) {
+            session.received_bytes += bytes_written;
             session.completed_files.insert(file_id.clone());
-            session.is_completed()
+            let all_done = session.is_completed();
+            (all_done, session.received_bytes, session.total_bytes)
         } else {
-            false
+            (true, bytes_written, session_total_bytes)
         }
     };
+
+    // Emit final progress and file completion events
+    let _ = state.sse_broadcast_tx.send(WebSseEvent::Progress {
+        transfer_id: session_id.clone(),
+        percent: if session_all_done {
+            100.0
+        } else {
+            ((final_loaded as f64 / final_total.max(1) as f64) * 100.0).clamp(0.0, 99.9)
+        },
+        loaded: final_loaded,
+        total: final_total,
+        speed_mb_s: 0.0,
+    });
+
+    let _ = state.sse_broadcast_tx.send(WebSseEvent::FileCompleted {
+        session_id: session_id.clone(),
+        file_id: file_id.clone(),
+        dest_path: dest_path.to_string_lossy().to_string(),
+    });
 
     if session_all_done {
         // Pin fingerprint on first completed transfer (TOFU)

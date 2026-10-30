@@ -41,6 +41,7 @@ pub enum ChatMessageKind {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum FileTransferStatus {
+    WaitingForAccept,
     PendingOffer,
     Transferring,
     Completed,
@@ -68,6 +69,14 @@ pub enum GuiEvent {
         total: u64,
         speed_mb_s: f64,
     },
+    FileCompleted {
+        session_id: String,
+        file_id: String,
+        dest_path: PathBuf,
+    },
+    OutgoingTransferStarted {
+        session_id: String,
+    },
     IncomingMessage {
         sender_id: String,
         sender_name: String,
@@ -92,6 +101,7 @@ pub enum GuiAction {
         target_name: String,
         target_peer_id: String,
         session_id: String,
+        files: Vec<FileMetadata>,
         file_paths: Vec<PathBuf>,
     },
     SendMessage {
@@ -128,6 +138,22 @@ pub struct DropItApp {
 
     pub startup_enabled: bool,
     pub context_menu_enabled: bool,
+}
+
+fn collect_paths_recursive(paths: &[PathBuf]) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    for p in paths {
+        if p.is_dir() {
+            if let Ok(entries) = std::fs::read_dir(p) {
+                let sub_paths: Vec<PathBuf> =
+                    entries.filter_map(|e| e.ok().map(|x| x.path())).collect();
+                files.extend(collect_paths_recursive(&sub_paths));
+            }
+        } else if p.is_file() {
+            files.push(p.clone());
+        }
+    }
+    files
 }
 
 impl DropItApp {
@@ -218,13 +244,22 @@ impl DropItApp {
         now
     }
 
-    fn send_selected_files(&mut self, files: Vec<PathBuf>) {
+    fn send_selected_files(&mut self, paths: Vec<PathBuf>) {
+        let files = collect_paths_recursive(&paths);
         if files.is_empty() {
             return;
         }
         let peer_id = match &self.selected_peer_id {
             Some(id) => id.clone(),
-            None => return,
+            None => {
+                if let Some(first_id) = self.peers.keys().next() {
+                    let id = first_id.clone();
+                    self.selected_peer_id = Some(id.clone());
+                    id
+                } else {
+                    return;
+                }
+            }
         };
         let peer = match self.peers.get(&peer_id) {
             Some(p) => p.clone(),
@@ -252,7 +287,7 @@ impl DropItApp {
             }
         }
 
-        // Add outgoing card to chat timeline
+        // Add outgoing card to chat timeline with WaitingForAccept
         let msg = ChatMessage {
             id: hex::encode(rand::random::<[u8; 8]>()),
             is_me: true,
@@ -264,7 +299,7 @@ impl DropItApp {
                 total_bytes,
                 progress: 0.0,
                 speed_mb_s: 0.0,
-                status: FileTransferStatus::Transferring,
+                status: FileTransferStatus::WaitingForAccept,
                 local_path: files.first().cloned(),
                 decision_tx: None,
             },
@@ -281,6 +316,7 @@ impl DropItApp {
             target_name: peer.name,
             target_peer_id: peer_id,
             session_id,
+            files: meta_list,
             file_paths: files,
         });
     }
@@ -479,6 +515,46 @@ impl eframe::App for DropItApp {
                         }
                     }
                 }
+                GuiEvent::FileCompleted {
+                    session_id,
+                    file_id: _,
+                    dest_path,
+                } => {
+                    for msgs in self.chat_history.values_mut() {
+                        for m in msgs.iter_mut() {
+                            if let ChatMessageKind::FileCard {
+                                session_id: s_id,
+                                progress,
+                                status,
+                                local_path,
+                                ..
+                            } = &mut m.kind
+                            {
+                                if s_id == &session_id {
+                                    *progress = 1.0;
+                                    *status = FileTransferStatus::Completed;
+                                    *local_path = Some(dest_path.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+                GuiEvent::OutgoingTransferStarted { session_id } => {
+                    for msgs in self.chat_history.values_mut() {
+                        for m in msgs.iter_mut() {
+                            if let ChatMessageKind::FileCard {
+                                session_id: s_id,
+                                status,
+                                ..
+                            } = &mut m.kind
+                            {
+                                if s_id == &session_id {
+                                    *status = FileTransferStatus::Transferring;
+                                }
+                            }
+                        }
+                    }
+                }
                 GuiEvent::IncomingMessage {
                     sender_id,
                     sender_name,
@@ -522,12 +598,17 @@ impl eframe::App for DropItApp {
                             {
                                 if s_id == &session_id {
                                     if total_bytes > 0 {
-                                        *progress = (bytes_transferred as f64 / total_bytes as f64) as f32;
+                                        *progress =
+                                            (bytes_transferred as f64 / total_bytes as f64) as f32;
                                     }
                                     *spd = speed_mb_s;
                                     if is_done {
                                         if let Some(err) = error.clone() {
-                                            *status = FileTransferStatus::Failed(err);
+                                            if err.to_ascii_lowercase().contains("decline") {
+                                                *status = FileTransferStatus::Declined;
+                                            } else {
+                                                *status = FileTransferStatus::Failed(err);
+                                            }
                                         } else {
                                             *status = FileTransferStatus::Completed;
                                             *progress = 1.0;
@@ -549,7 +630,7 @@ impl eframe::App for DropItApp {
                 .filter_map(|d| d.path.clone())
                 .collect()
         });
-        if !dropped_files.is_empty() && self.selected_peer_id.is_some() {
+        if !dropped_files.is_empty() {
             self.send_selected_files(dropped_files);
         }
 
@@ -999,16 +1080,8 @@ impl DropItApp {
                             .clicked()
                         {
                             if let Some(folder) = rfd::FileDialog::new().pick_folder() {
-                                // Recursively find files or send root folder files
-                                if let Ok(entries) = std::fs::read_dir(&folder) {
-                                    let mut files = Vec::new();
-                                    for entry in entries.flatten() {
-                                        if entry.path().is_file() {
-                                            files.push(entry.path());
-                                        }
-                                    }
-                                    self.send_selected_files(files);
-                                }
+                                let files = collect_paths_recursive(&[folder]);
+                                self.send_selected_files(files);
                             }
                         }
 
@@ -1028,14 +1101,38 @@ impl DropItApp {
                 });
             });
 
+        // Check if files are currently being dragged over window
+        let is_hovering = ui.input(|i| !i.raw.hovered_files.is_empty());
+
         // Chat Timeline
         let available_h = ui.available_height() - 65.0; // leave room for input bar
+        let mut decision_to_make: Option<(String, bool)> = None;
+
         egui::ScrollArea::vertical()
             .auto_shrink([false; 2])
             .stick_to_bottom(true)
             .max_height(available_h)
             .show(ui, |ui| {
                 ui.add_space(12.0);
+
+                if is_hovering {
+                    ui.vertical_centered(|ui| {
+                        egui::Frame::NONE
+                            .fill(egui::Color32::from_rgba_premultiplied(79, 70, 229, 70))
+                            .stroke(egui::Stroke::new(2.0_f32, egui::Color32::from_rgb(99, 102, 241)))
+                            .corner_radius(12.0)
+                            .inner_margin(egui::Margin::symmetric(24, 16))
+                            .show(ui, |ui| {
+                                ui.label(
+                                    egui::RichText::new("📥 Drop files or folder here to send!")
+                                        .size(16.0)
+                                        .strong()
+                                        .color(egui::Color32::WHITE),
+                                );
+                            });
+                    });
+                    ui.add_space(10.0);
+                }
 
                 // Pairing Security Banner
                 let pairing_code =
@@ -1062,20 +1159,83 @@ impl DropItApp {
                 if let Some(messages) = self.chat_history.get(&selected_id) {
                     let msgs_clone = messages.clone();
                     for msg in msgs_clone {
-                        self.render_chat_bubble(ui, &msg);
+                        if let Some(dec) = self.render_chat_bubble(ui, &msg) {
+                            decision_to_make = Some(dec);
+                        }
                         ui.add_space(8.0);
                     }
                 } else {
-                    ui.add_space(40.0);
+                    ui.add_space(20.0);
                     ui.vertical_centered(|ui| {
-                        ui.label(
-                            egui::RichText::new("Drag and drop files here, or tap 'Send Files' to transfer")
-                                .size(13.0)
-                                .color(egui::Color32::from_rgb(107, 114, 128)),
-                        );
+                        egui::Frame::NONE
+                            .fill(egui::Color32::from_rgb(20, 23, 33))
+                            .stroke(egui::Stroke::new(1.5_f32, egui::Color32::from_rgb(45, 52, 75)))
+                            .corner_radius(12.0)
+                            .inner_margin(egui::Margin::symmetric(28, 20))
+                            .show(ui, |ui| {
+                                ui.label(egui::RichText::new("📥").size(32.0));
+                                ui.add_space(6.0);
+                                ui.label(
+                                    egui::RichText::new("Drag & Drop Files or Folders Here")
+                                        .size(15.0)
+                                        .strong()
+                                        .color(egui::Color32::WHITE),
+                                );
+                                ui.add_space(4.0);
+                                ui.label(
+                                    egui::RichText::new("Drop files directly into this chat to send immediately.")
+                                        .size(12.0)
+                                        .color(egui::Color32::from_rgb(156, 163, 175)),
+                                );
+                                ui.add_space(10.0);
+                                ui.horizontal(|ui| {
+                                    if ui.button(egui::RichText::new("📎 Browse Files").color(egui::Color32::WHITE)).clicked() {
+                                        if let Some(files) = rfd::FileDialog::new().pick_files() {
+                                            self.send_selected_files(files);
+                                        }
+                                    }
+                                    if ui.button(egui::RichText::new("📁 Browse Folder").color(egui::Color32::WHITE)).clicked() {
+                                        if let Some(folder) = rfd::FileDialog::new().pick_folder() {
+                                            let files = collect_paths_recursive(&[folder]);
+                                            self.send_selected_files(files);
+                                        }
+                                    }
+                                });
+                            });
                     });
                 }
             });
+
+        // Apply any transfer decision made in this frame
+        if let Some((sess_id, accepted)) = decision_to_make {
+            if let Some(msgs) = self.chat_history.get_mut(&selected_id) {
+                for m in msgs.iter_mut() {
+                    if let ChatMessageKind::FileCard {
+                        session_id,
+                        status,
+                        decision_tx,
+                        ..
+                    } = &mut m.kind
+                    {
+                        if session_id == &sess_id {
+                            *status = if accepted {
+                                FileTransferStatus::Transferring
+                            } else {
+                                FileTransferStatus::Declined
+                            };
+                            if let Some(tx_arc) = decision_tx.take() {
+                                tokio::spawn(async move {
+                                    let mut lock = tx_arc.lock().await;
+                                    if let Some(tx) = lock.take() {
+                                        let _ = tx.send(accepted);
+                                    }
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         // Bottom Message & File Input Bar
         ui.separator();
@@ -1087,10 +1247,25 @@ impl DropItApp {
                         .corner_radius(8.0)
                         .min_size(egui::vec2(36.0, 36.0)),
                 )
-                .on_hover_text("Choose files to send")
+                .on_hover_text("Choose files to send (or Drag & Drop)")
                 .clicked()
             {
                 if let Some(files) = rfd::FileDialog::new().pick_files() {
+                    self.send_selected_files(files);
+                }
+            }
+
+            if ui
+                .add(
+                    egui::Button::new(egui::RichText::new("📁").size(18.0))
+                        .corner_radius(8.0)
+                        .min_size(egui::vec2(36.0, 36.0)),
+                )
+                .on_hover_text("Choose folder to send")
+                .clicked()
+            {
+                if let Some(folder) = rfd::FileDialog::new().pick_folder() {
+                    let files = collect_paths_recursive(&[folder]);
                     self.send_selected_files(files);
                 }
             }
@@ -1121,13 +1296,19 @@ impl DropItApp {
         });
     }
 
-    fn render_chat_bubble(&mut self, ui: &mut egui::Ui, msg: &ChatMessage) {
+    fn render_chat_bubble(
+        &mut self,
+        ui: &mut egui::Ui,
+        msg: &ChatMessage,
+    ) -> Option<(String, bool)> {
         let is_me = msg.is_me;
         let align = if is_me {
             egui::Align::Max
         } else {
             egui::Align::Min
         };
+
+        let mut decision_result: Option<(String, bool)> = None;
 
         ui.with_layout(egui::Layout::top_down(align), |ui| {
             let max_w = 420.0;
@@ -1163,13 +1344,14 @@ impl DropItApp {
                         }
 
                         ChatMessageKind::FileCard {
+                            session_id,
                             files,
                             total_bytes,
                             progress,
                             speed_mb_s,
                             status,
                             local_path,
-                            decision_tx,
+                            decision_tx: _,
                             ..
                         } => {
                             let file_count = files.len();
@@ -1204,6 +1386,17 @@ impl DropItApp {
                             ui.add_space(6.0);
 
                             match status {
+                                FileTransferStatus::WaitingForAccept => {
+                                    ui.horizontal(|ui| {
+                                        ui.spinner();
+                                        ui.label(
+                                            egui::RichText::new("Waiting for receiver to accept...")
+                                                .size(12.0)
+                                                .color(egui::Color32::from_rgb(251, 191, 36)),
+                                        );
+                                    });
+                                }
+
                                 FileTransferStatus::PendingOffer => {
                                     ui.label(
                                         egui::RichText::new("Incoming Transfer Offer")
@@ -1212,38 +1405,24 @@ impl DropItApp {
                                     );
                                     ui.add_space(4.0);
                                     ui.horizontal(|ui| {
-                                        if let Some(tx_arc) = decision_tx {
-                                            let tx_arc_accept = tx_arc.clone();
-                                            if ui
-                                                .button(
-                                                    egui::RichText::new("Accept ✅")
-                                                        .color(egui::Color32::WHITE),
-                                                )
-                                                .clicked()
-                                            {
-                                                tokio::spawn(async move {
-                                                    let mut lock = tx_arc_accept.lock().await;
-                                                    if let Some(tx) = lock.take() {
-                                                        let _ = tx.send(true);
-                                                    }
-                                                });
-                                            }
+                                        if ui
+                                            .button(
+                                                egui::RichText::new("Accept ✅")
+                                                    .color(egui::Color32::WHITE),
+                                            )
+                                            .clicked()
+                                        {
+                                            decision_result = Some((session_id.clone(), true));
+                                        }
 
-                                            let tx_arc_decline = tx_arc.clone();
-                                            if ui
-                                                .button(
-                                                    egui::RichText::new("Decline ❌")
-                                                        .color(egui::Color32::from_rgb(239, 68, 68)),
-                                                )
-                                                .clicked()
-                                            {
-                                                tokio::spawn(async move {
-                                                    let mut lock = tx_arc_decline.lock().await;
-                                                    if let Some(tx) = lock.take() {
-                                                        let _ = tx.send(false);
-                                                    }
-                                                });
-                                            }
+                                        if ui
+                                            .button(
+                                                egui::RichText::new("Decline ❌")
+                                                    .color(egui::Color32::from_rgb(239, 68, 68)),
+                                            )
+                                            .clicked()
+                                        {
+                                            decision_result = Some((session_id.clone(), false));
                                         }
                                     });
                                 }
@@ -1286,7 +1465,7 @@ impl DropItApp {
 
                                 FileTransferStatus::Declined => {
                                     ui.label(
-                                        egui::RichText::new("Transfer Declined")
+                                        egui::RichText::new("Transfer Declined ❌")
                                             .size(11.0)
                                             .color(egui::Color32::from_rgb(239, 68, 68)),
                                     );
@@ -1313,6 +1492,8 @@ impl DropItApp {
                     }
                 });
         });
+
+        decision_result
     }
 
     fn render_settings_modal(&mut self, ctx: &egui::Context) {
@@ -1520,6 +1701,17 @@ pub async fn run_gui_app(
                         speed_mb_s,
                     });
                 }
+                WebSseEvent::FileCompleted {
+                    session_id,
+                    file_id,
+                    dest_path,
+                } => {
+                    let _ = tx_sse.send(GuiEvent::FileCompleted {
+                        session_id,
+                        file_id,
+                        dest_path: PathBuf::from(dest_path),
+                    });
+                }
                 WebSseEvent::Message {
                     sender_id,
                     sender_name,
@@ -1574,6 +1766,7 @@ pub async fn run_gui_app(
                     target_name: _,
                     target_peer_id,
                     session_id,
+                    files,
                     file_paths,
                 } => {
                     let client_clone = client.clone();
@@ -1585,28 +1778,12 @@ pub async fn run_gui_app(
                     drop(cfg_guard);
 
                     tokio::spawn(async move {
-                        let mut meta_list = Vec::new();
-                        for p in &file_paths {
-                            if let Ok(m) = p.metadata() {
-                                let filename = p
-                                    .file_name()
-                                    .map(|f| f.to_string_lossy().to_string())
-                                    .unwrap_or_else(|| "unnamed_file".to_string());
-                                meta_list.push(FileMetadata {
-                                    file_id: hex::encode(rand::random::<[u8; 8]>()),
-                                    filename,
-                                    size_bytes: m.len(),
-                                    blake3_hash: None,
-                                });
-                            }
-                        }
-
                         let offer_req = TransferOfferRequest {
                             session_id: session_id.clone(),
                             sender_name: dev_name,
                             sender_device_id: dev_id,
                             sender_fingerprint: fp,
-                            files: meta_list.clone(),
+                            files: files.clone(),
                         };
 
                         match client_clone.send_offer(&target_addr, &offer_req).await {
@@ -1620,17 +1797,22 @@ pub async fn run_gui_app(
                                         total_bytes: 0,
                                         speed_mb_s: 0.0,
                                         is_done: true,
-                                        error: Some("Declined by receiver".into()),
+                                        error: Some(resp.reason.unwrap_or_else(|| "Declined by receiver".into())),
                                     });
                                     return;
                                 }
+
+                                let _ = tx_fb.send(GuiEvent::OutgoingTransferStarted {
+                                    session_id: session_id.clone(),
+                                });
+
                                 let token = match resp.session_token {
                                     Some(t) => t,
                                     None => return,
                                 };
 
                                 let items: Vec<(FileMetadata, PathBuf)> =
-                                    meta_list.iter().cloned().zip(file_paths).collect();
+                                    files.iter().cloned().zip(file_paths).collect();
 
                                 let tx_progress = tx_fb.clone();
                                 let peer_id_clone = target_peer_id.clone();

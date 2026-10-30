@@ -1,3 +1,5 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 use dropit::client::DropItClient;
@@ -74,14 +76,21 @@ enum Commands {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    #[cfg(windows)]
+    {
+        // Attach to parent console if invoked from a command prompt (CLI commands like --help, send, receive)
+        // If launched via double-click, shortcut, or Explorer, NO console window is created.
+        unsafe extern "system" {
+            fn AttachConsole(dwProcessId: u32) -> i32;
+        }
+        const ATTACH_PARENT_PROCESS: u32 = 0xFFFFFFFF;
+        unsafe {
+            let _ = AttachConsole(ATTACH_PARENT_PROCESS);
+        }
+    }
+
     if let Err(e) = run().await {
         eprintln!("\n❌ Drop It Error: {:#}", e);
-        #[cfg(windows)]
-        {
-            println!("\nPress Enter to exit...");
-            let mut buf = String::new();
-            let _ = std::io::stdin().read_line(&mut buf);
-        }
         std::process::exit(1);
     }
     Ok(())
