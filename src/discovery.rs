@@ -519,11 +519,11 @@ mod tests {
             .update_or_insert(announcement, addr, DiscoverySource::Multicast)
             .await;
 
-        // Manually age the peer
+        // Manually age the peer past expiry
         {
             let mut peers = registry.peers.write().await;
             if let Some(peer) = peers.get_mut("dev-stale") {
-                peer.last_seen = Instant::now() - Duration::from_secs(10);
+                peer.last_seen = Instant::now() - (PEER_EXPIRY_DURATION + Duration::from_secs(5));
             }
         }
 
