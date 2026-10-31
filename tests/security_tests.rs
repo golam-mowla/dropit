@@ -75,6 +75,7 @@ async fn test_path_traversal_and_malicious_filenames() {
         sender_name: "Attacker Node".to_string(),
         sender_device_id: "attacker-device-id".to_string(),
         sender_fingerprint: sender_identity.fingerprint.clone(),
+        sender_port: 53420,
         files: metas.clone(),
     };
 
@@ -174,6 +175,7 @@ async fn test_pinned_fingerprint_mismatch_rejection() {
         sender_name: "Impersonator Node".to_string(),
         sender_device_id: "trusted-peer-1".to_string(),
         sender_fingerprint: different_fp,
+        sender_port: 53420,
         files: vec![FileMetadata {
             file_id: "0".to_string(),
             filename: "exploit.txt".to_string(),
@@ -242,6 +244,7 @@ async fn test_rate_limiting_rapid_offers() {
         sender_name: "Spam Node".to_string(),
         sender_device_id: "spam-device-id".to_string(),
         sender_fingerprint: sender_identity.fingerprint.clone(),
+        sender_port: 53420,
         files: vec![FileMetadata {
             file_id: "0".to_string(),
             filename: "spam.txt".to_string(),
@@ -320,6 +323,7 @@ async fn test_max_concurrent_sessions_limit() {
             sender_name: format!("Node {i}"),
             sender_device_id: format!("device-{i}"),
             sender_fingerprint: sender_identity.fingerprint,
+            sender_port: 53420,
             files: vec![FileMetadata {
                 file_id: "0".to_string(),
                 filename: format!("file_{i}.dat"),
@@ -339,6 +343,7 @@ async fn test_max_concurrent_sessions_limit() {
         sender_name: "Overflow Node".to_string(),
         sender_device_id: "overflow-device".to_string(),
         sender_fingerprint: overflow_sender.fingerprint,
+        sender_port: 53420,
         files: vec![FileMetadata {
             file_id: "0".to_string(),
             filename: "overflow.dat".to_string(),
@@ -407,6 +412,7 @@ async fn test_unauthorized_token_rejection() {
         sender_name: "Sender Node".to_string(),
         sender_device_id: "sender-device".to_string(),
         sender_fingerprint: sender_identity.fingerprint,
+        sender_port: 53420,
         files: vec![FileMetadata {
             file_id: "0".to_string(),
             filename: "secret.txt".to_string(),

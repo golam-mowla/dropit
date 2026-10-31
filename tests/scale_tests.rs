@@ -80,6 +80,7 @@ async fn test_send_2gb_large_file_streaming() {
         sender_name: "Scale Sender".to_string(),
         sender_device_id: "scale-sender-1".to_string(),
         sender_fingerprint: sender_identity.fingerprint.clone(),
+        sender_port: 53420,
         files: vec![meta.clone()],
     };
 
@@ -193,6 +194,7 @@ async fn test_send_1000_small_files_batch() {
         sender_name: "1000 Sender".to_string(),
         sender_device_id: "sender-1000-id".to_string(),
         sender_fingerprint: sender_identity.fingerprint,
+        sender_port: 53420,
         files: metas,
     };
 

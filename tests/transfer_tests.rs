@@ -80,6 +80,7 @@ async fn test_secure_file_streaming_roundtrip() {
         sender_name: "Sender Node".to_string(),
         sender_device_id: "sender-id-1".to_string(),
         sender_fingerprint: sender_identity.fingerprint.clone(),
+        sender_port: 53420,
         files: vec![meta.clone()],
     };
 
@@ -194,6 +195,7 @@ async fn test_resume_interrupted_transfer() {
         sender_name: "Sender Node".to_string(),
         sender_device_id: "sender-resume-1".to_string(),
         sender_fingerprint: sender_identity.fingerprint.clone(),
+        sender_port: 53420,
         files: vec![meta.clone()],
     };
 
@@ -314,6 +316,7 @@ async fn test_parallel_small_file_streams() {
         sender_name: "Parallel Sender".to_string(),
         sender_device_id: "sender-parallel-1".to_string(),
         sender_fingerprint: sender_identity.fingerprint.clone(),
+        sender_port: 53420,
         files: metas,
     };
 
@@ -416,6 +419,7 @@ async fn test_verify_hash_toggle() {
         sender_name: "Sender Node".to_string(),
         sender_device_id: "sender-noverify-1".to_string(),
         sender_fingerprint: sender_identity.fingerprint.clone(),
+        sender_port: 53420,
         files: vec![meta.clone()],
     };
 
