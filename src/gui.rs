@@ -185,6 +185,7 @@ pub struct DropItApp {
     pub context_menu_enabled: bool,
     pub active_rail_tab: GuiRailTab,
     pub transfer_history: Vec<HistoryRecord>,
+    pub is_quitting: bool,
 }
 
 fn collect_paths_recursive(paths: &[PathBuf]) -> Vec<PathBuf> {
@@ -399,6 +400,42 @@ impl DropItApp {
         let tray_channel = tray_icon::TrayIconEvent::receiver().clone();
         let menu_channel = tray_icon::menu::MenuEvent::receiver().clone();
 
+        // Spawn a dedicated background thread to listen for tray clicks and menu events immediately,
+        // ensuring instant exit and window restoration even when the main window is hidden/minimized.
+        let quit_id = quit_menu_id.clone();
+        let show_id = show_menu_id.clone();
+        let egui_ctx = cc.egui_ctx.clone();
+        let thread_menu_recv = menu_channel.clone();
+        let thread_tray_recv = tray_channel.clone();
+
+        std::thread::spawn(move || {
+            loop {
+                while let Ok(event) = thread_menu_recv.try_recv() {
+                    if event.id == quit_id {
+                        std::process::exit(0);
+                    } else if event.id == show_id {
+                        egui_ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                        egui_ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+                        egui_ctx.request_repaint();
+                    }
+                }
+
+                while let Ok(event) = thread_tray_recv.try_recv() {
+                    if let tray_icon::TrayIconEvent::Click {
+                        button: tray_icon::MouseButton::Left,
+                        ..
+                    } = event
+                    {
+                        egui_ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                        egui_ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+                        egui_ctx.request_repaint();
+                    }
+                }
+
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+        });
+
         let startup_enabled = platform::get_run_on_startup();
         let context_menu_enabled = platform::get_context_menu_enabled();
 
@@ -431,6 +468,7 @@ impl DropItApp {
             context_menu_enabled,
             active_rail_tab: GuiRailTab::Transfers,
             transfer_history: Vec::new(),
+            is_quitting: false,
         }
     }
 
@@ -601,9 +639,9 @@ fn get_file_type_icon(name: &str) -> &'static str {
 
 impl eframe::App for DropItApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // Handle window close request -> minimize to tray if enabled
+        // Handle window close request -> minimize to tray if enabled and not quitting
         if ctx.input(|i| i.viewport().close_requested()) {
-            if self.config.minimize_to_tray {
+            if !self.is_quitting && self.config.minimize_to_tray {
                 ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
                 ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
             }
@@ -615,7 +653,9 @@ impl eframe::App for DropItApp {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
                 ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
             } else if event.id == self.quit_menu_id {
-                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                self.is_quitting = true;
+                let _ = self.config.save();
+                std::process::exit(0);
             }
         }
 
