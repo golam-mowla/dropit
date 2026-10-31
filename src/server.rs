@@ -4,7 +4,8 @@ use crate::crypto::{self, TlsIdentity};
 use crate::discovery::PeerRegistry;
 use crate::security::{is_private_or_loopback_ip, resolve_destination_path};
 use crate::transfer::{
-    ActiveSession, FileMetadata, TransferOfferRequest, TransferOfferResponse, UploadResult,
+    ActiveSession, FileMetadata, TransferControlCommand, TransferControlPayload,
+    TransferOfferRequest, TransferOfferResponse, UploadResult,
 };
 use anyhow::{Context, Result};
 use axum::{
@@ -52,6 +53,7 @@ pub struct ServerState {
     pub offer_prompt_tx: Option<mpsc::Sender<OfferDecisionRequest>>,
     pub pending_web_decisions: Arc<RwLock<HashMap<String, oneshot::Sender<bool>>>>,
     pub sse_broadcast_tx: broadcast::Sender<WebSseEvent>,
+    pub rate_limiter: crate::security::PairingRateLimiter,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -78,6 +80,15 @@ pub enum WebSseEvent {
         session_id: String,
         file_id: String,
         dest_path: String,
+    },
+    TransferCancelled {
+        session_id: String,
+    },
+    TransferPaused {
+        session_id: String,
+    },
+    TransferResumed {
+        session_id: String,
     },
     Message {
         sender_id: String,
@@ -138,6 +149,7 @@ impl ServerState {
             offer_prompt_tx,
             pending_web_decisions: Arc::new(RwLock::new(HashMap::new())),
             sse_broadcast_tx,
+            rate_limiter: crate::security::PairingRateLimiter::default(),
         }
     }
 }
@@ -153,6 +165,7 @@ pub async fn build_router(state: ServerState) -> Router {
         .route("/api/settings", post(handle_post_settings))
         .route("/api/web_send", post(handle_post_web_send))
         .route("/api/offer", post(handle_post_offer))
+        .route("/api/transfer/control", post(handle_post_transfer_control))
         .route("/api/message", post(handle_post_message))
         .route(
             "/api/upload/{session_id}/{file_id}",
@@ -358,6 +371,18 @@ async fn handle_get_events(
                     });
                     Event::default().event("message").data(json.to_string())
                 }
+                WebSseEvent::TransferPaused { session_id } => {
+                    let json = serde_json::json!({ "session_id": session_id, "status": "paused" });
+                    Event::default().event("transfer_paused").data(json.to_string())
+                }
+                WebSseEvent::TransferResumed { session_id } => {
+                    let json = serde_json::json!({ "session_id": session_id, "status": "resumed" });
+                    Event::default().event("transfer_resumed").data(json.to_string())
+                }
+                WebSseEvent::TransferCancelled { session_id } => {
+                    let json = serde_json::json!({ "session_id": session_id, "status": "cancelled" });
+                    Event::default().event("transfer_cancelled").data(json.to_string())
+                }
             };
             if tx_clone.send(Ok(event)).await.is_err() {
                 break;
@@ -432,6 +457,47 @@ async fn handle_post_message(
         text: payload.text,
     });
     StatusCode::OK
+}
+
+async fn handle_post_transfer_control(
+    State(state): State<ServerState>,
+    Json(payload): Json<TransferControlPayload>,
+) -> impl IntoResponse {
+    let mut sessions = state.active_sessions.write().await;
+    if let Some(session) = sessions.get_mut(&payload.session_id) {
+        match payload.command {
+            TransferControlCommand::Pause => {
+                session.is_paused = true;
+                let _ = state.sse_broadcast_tx.send(WebSseEvent::TransferPaused {
+                    session_id: payload.session_id.clone(),
+                });
+            }
+            TransferControlCommand::Resume => {
+                session.is_paused = false;
+                let _ = state.sse_broadcast_tx.send(WebSseEvent::TransferResumed {
+                    session_id: payload.session_id.clone(),
+                });
+            }
+            TransferControlCommand::Cancel => {
+                session.is_cancelled = true;
+                // Delete partial files
+                for (file_id, path) in &session.dest_paths {
+                    if !session.completed_files.contains(file_id) && path.exists() {
+                        let _ = tokio::fs::remove_file(path).await;
+                    }
+                }
+                let _ = state.sse_broadcast_tx.send(WebSseEvent::TransferCancelled {
+                    session_id: payload.session_id.clone(),
+                });
+            }
+        }
+        (StatusCode::OK, Json(serde_json::json!({ "status": "ok" })))
+    } else {
+        (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "status": "session_not_found" })),
+        )
+    }
 }
 
 async fn handle_post_settings(
@@ -511,6 +577,7 @@ async fn handle_post_web_send(
             filename: name.clone(),
             size_bytes: *size,
             blake3_hash: Some(hash),
+            sha256_hash: None,
         });
     }
 
@@ -573,7 +640,13 @@ async fn handle_post_offer(
         ));
     }
 
-    // 2. Rate-limit check: at most 1 offer every 200ms per IP
+    // 2. Rate-limit check: at most 1 offer every 200ms per IP + brute-force pairing lock
+    if state.rate_limiter.is_locked(&peer_addr.ip()).await {
+        return Err((
+            StatusCode::TOO_MANY_REQUESTS,
+            "Pairing rate limit exceeded: device temporarily locked out for 5 minutes".into(),
+        ));
+    }
     {
         let mut recent = state.recent_offers.write().await;
         let now = Instant::now();
@@ -670,13 +743,21 @@ async fn handle_post_offer(
         PeerTrustStatus::Untrusted => false,
     };
 
+    let target_dir = config.get_download_dir_for_peer(&offer.sender_device_id);
+    let total_offer_bytes: u64 = offer.files.iter().map(|f| f.size_bytes).sum();
+    if let Err(e) = crate::security::check_free_space(&target_dir, total_offer_bytes) {
+        warn!("Disk space check failed: {e}");
+        return Err((StatusCode::INSUFFICIENT_STORAGE, e.to_string()));
+    }
+
     // 6. Acceptance decision: Auto-accept > Web UI prompt > CLI prompt
     let has_web_client = state.sse_broadcast_tx.receiver_count() > 0;
     let has_cli_prompt = state.offer_prompt_tx.is_some();
+    let is_fav_auto = config.is_auto_accept_for_favorite(&offer.sender_device_id);
 
-    let accepted = if is_trusted && config.auto_accept_trusted {
+    let accepted = if (is_trusted && config.auto_accept_trusted) || is_fav_auto {
         info!(
-            "Auto-accepted transfer offer from trusted peer '{}'",
+            "Auto-accepted transfer offer from peer '{}'",
             offer.sender_name
         );
         true
@@ -734,17 +815,20 @@ async fn handle_post_offer(
     };
 
     if !accepted {
+        let _ = state.rate_limiter.check_and_record_failure(peer_addr.ip()).await;
         return Ok(Json(TransferOfferResponse {
             accepted: false,
             session_token: None,
             pairing_code,
             reason: Some("Transfer declined by receiver".into()),
         }));
+    } else {
+        state.rate_limiter.reset(&peer_addr.ip()).await;
     }
 
     // 7. Initialize active session & destination paths
     let session_token = crypto::generate_session_token();
-    let download_dir = config.download_dir.clone();
+    let download_dir = target_dir;
     drop(config); // release lock
 
     let mut dest_paths = HashMap::new();
@@ -765,6 +849,8 @@ async fn handle_post_offer(
         completed_files: HashSet::new(),
         total_bytes: total_offer_bytes,
         received_bytes: 0,
+        is_paused: false,
+        is_cancelled: false,
         created_at: Instant::now(),
     };
 
@@ -903,7 +989,7 @@ async fn handle_put_upload(
         })?;
 
     // 3. Session lookup & verification
-    let (dest_path, expected_hash, sender_device_id, sender_fingerprint, session_total_bytes) = {
+    let (dest_path, expected_hash, expected_sha256, sender_device_id, sender_fingerprint, session_total_bytes) = {
         let sessions = state.active_sessions.read().await;
         let session = sessions.get(&session_id).ok_or_else(|| {
             (
@@ -945,6 +1031,7 @@ async fn handle_put_upload(
         (
             path,
             meta.blake3_hash,
+            meta.sha256_hash,
             session.sender_device_id.clone(),
             session.sender_fingerprint.clone(),
             session.total_bytes,
@@ -1021,6 +1108,18 @@ async fn handle_put_upload(
     };
 
     while let Some(chunk_res) = body_stream.next().await {
+        // Check if session was cancelled
+        {
+            let sessions = state.active_sessions.read().await;
+            if let Some(s) = sessions.get(&session_id)
+                && s.is_cancelled
+            {
+                drop(file);
+                let _ = tokio::fs::remove_file(&dest_path).await;
+                return Err((StatusCode::GONE, "Transfer cancelled by receiver".into()));
+            }
+        }
+
         let chunk = chunk_res.map_err(|err| {
             error!(
                 "Streaming error while receiving file {:?}: {}",
@@ -1103,6 +1202,31 @@ async fn handle_put_upload(
         warn!("BLAKE3 hash verification failed for file {:?}", dest_path);
         let _ = tokio::fs::remove_file(&dest_path).await;
         return Err((StatusCode::BAD_REQUEST, "BLAKE3 hash mismatch".into()));
+    }
+
+    // SHA-256 verification (if sender provided sha256_hash)
+    if let Some(ref exp_sha) = expected_sha256 {
+        let actual_sha = crypto::hash_file_sha256_streaming(&dest_path)
+            .await
+            .map_err(|err| {
+                error!("Failed to compute SHA-256 for {:?}: {}", dest_path, err);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to compute SHA-256: {err}"),
+                )
+            })?;
+        if !exp_sha.eq_ignore_ascii_case(&actual_sha) {
+            warn!(
+                "SHA-256 hash mismatch for {:?}: expected {}, computed {}",
+                dest_path, exp_sha, actual_sha
+            );
+            let _ = tokio::fs::remove_file(&dest_path).await;
+            return Err((StatusCode::BAD_REQUEST, "SHA-256 hash mismatch".into()));
+        }
+    }
+
+    if crate::security::is_dangerous_executable(&dest_path.to_string_lossy()) {
+        warn!("⚠️ Received executable file: {:?}", dest_path);
     }
 
     info!(

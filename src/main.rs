@@ -208,6 +208,7 @@ async fn handle_send_command(
             filename,
             size_bytes: size,
             blake3_hash,
+            sha256_hash: None,
         });
     }
 

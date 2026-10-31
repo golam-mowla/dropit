@@ -56,6 +56,14 @@ pub struct DropItConfig {
     pub run_on_startup: bool,
     #[serde(default = "default_true")]
     pub context_menu_enabled: bool,
+    #[serde(default = "default_true")]
+    pub visible_to_nearby: bool,
+    #[serde(default = "default_true")]
+    pub dark_theme: bool,
+    #[serde(default)]
+    pub device_download_dirs: HashMap<String, PathBuf>,
+    #[serde(default)]
+    pub auto_accept_favorites: HashMap<String, bool>,
 }
 
 fn default_true() -> bool {
@@ -84,6 +92,10 @@ impl Default for DropItConfig {
             minimize_to_tray: true,
             run_on_startup: false,
             context_menu_enabled: true,
+            visible_to_nearby: true,
+            dark_theme: true,
+            device_download_dirs: HashMap::new(),
+            auto_accept_favorites: HashMap::new(),
         }
     }
 }
@@ -166,6 +178,26 @@ impl DropItConfig {
             }
         }
         original_name
+    }
+
+    pub fn get_download_dir_for_peer(&self, peer_id: &str) -> PathBuf {
+        if let Some(dir) = self.device_download_dirs.get(peer_id) {
+            if dir.exists() {
+                return dir.clone();
+            }
+        }
+        self.download_dir.clone()
+    }
+
+    pub fn is_auto_accept_for_favorite(&self, peer_id: &str) -> bool {
+        if !self.is_favorite(peer_id) {
+            return false;
+        }
+        *self.auto_accept_favorites.get(peer_id).unwrap_or(&false)
+    }
+
+    pub fn set_auto_accept_for_favorite(&mut self, peer_id: &str, enabled: bool) {
+        self.auto_accept_favorites.insert(peer_id.to_string(), enabled);
     }
 
     pub fn set_nickname(&mut self, id: &str, nickname: &str) -> Result<()> {

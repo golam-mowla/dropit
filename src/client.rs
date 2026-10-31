@@ -296,6 +296,32 @@ impl DropItClient {
         Ok(upload_result)
     }
 
+    /// Sends a transfer control command (Pause, Resume, Cancel) to the receiver
+    pub async fn send_transfer_control(
+        &self,
+        host_port: &str,
+        session_id: &str,
+        command: crate::transfer::TransferControlCommand,
+    ) -> Result<()> {
+        let url = format!("https://{host_port}/api/transfer/control");
+        let payload = crate::transfer::TransferControlPayload {
+            session_id: session_id.to_string(),
+            command,
+            reason: None,
+        };
+        let res = self
+            .client
+            .post(&url)
+            .json(&payload)
+            .send()
+            .await
+            .with_context(|| format!("Failed to send transfer control to {url}"))?;
+        if !res.status().is_success() {
+            bail!("Transfer control command failed: HTTP {}", res.status());
+        }
+        Ok(())
+    }
+
     /// Orchestrates file transfers honoring the priorities:
     /// - 4 parallel streams for small files (< 16 MB)
     /// - 1 dedicated stream for big files (>= 16 MB) to saturate the link without contention

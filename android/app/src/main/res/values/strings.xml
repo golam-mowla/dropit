@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Drop It</string>
+    <string name="channel_name">Drop It File Transfers</string>
+    <string name="channel_description">Active local network file transfer status</string>
+</resources>

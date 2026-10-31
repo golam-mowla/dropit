@@ -11,11 +11,14 @@ fn main() {
             println!("cargo:rustc-link-arg-bin=dropit={}", p);
         }
 
-        // On gnullvm/MinGW, statically link libunwind by prioritizing local assets/libunwind.a
-        // over the toolchain's dynamic libunwind.dll.a
-        let target_env = std::env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
-        if target_env == "gnullvm" && assets_dir.join("libunwind.a").exists() {
+        // On gnullvm/MinGW, statically link libunwind by directly passing assets/libunwind.a
+        let libunwind_path = assets_dir.join("libunwind.a");
+        if libunwind_path.exists() {
             println!("cargo:rustc-link-search=native={}", assets_dir.display());
+            println!("cargo:rustc-link-arg-bin=dropit={}", libunwind_path.display());
+            println!("cargo:rustc-link-arg-bin=dropit=-Wl,-Bstatic");
+            println!("cargo:rustc-link-arg-bin=dropit=-lunwind");
+            println!("cargo:rustc-link-arg-bin=dropit=-Wl,-Bdynamic");
         }
 
         println!("cargo:rerun-if-changed=build.rs");

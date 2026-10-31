@@ -41,13 +41,42 @@ pub enum ChatMessageKind {
     },
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GuiRailTab {
+    Transfers,
+    History,
+    Favorites,
+    Nearby,
+    Settings,
+}
+
+#[derive(Clone, Debug)]
+pub struct HistoryRecord {
+    pub id: String,
+    pub filename: String,
+    pub size_bytes: u64,
+    pub is_outgoing: bool,
+    pub peer_name: String,
+    pub time_str: String,
+    pub status: String,
+    pub local_path: Option<PathBuf>,
+}
+
+#[derive(Clone, Debug)]
+pub enum BubbleAction {
+    Decision(String, bool),
+    Control(String, crate::transfer::TransferControlCommand),
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum FileTransferStatus {
     WaitingForAccept,
     PendingOffer,
     Transferring,
+    Paused(String),
     Completed,
     Declined,
+    Cancelled,
     Failed(String),
 }
 
@@ -75,6 +104,15 @@ pub enum GuiEvent {
         session_id: String,
         file_id: String,
         dest_path: PathBuf,
+    },
+    TransferPaused {
+        session_id: String,
+    },
+    TransferResumed {
+        session_id: String,
+    },
+    TransferCancelled {
+        session_id: String,
     },
     OutgoingTransferStarted {
         session_id: String,
@@ -110,6 +148,11 @@ pub enum GuiAction {
         target_addr: String,
         text: String,
     },
+    TransferControl {
+        target_addr: String,
+        session_id: String,
+        command: crate::transfer::TransferControlCommand,
+    },
 }
 
 pub struct DropItApp {
@@ -140,6 +183,8 @@ pub struct DropItApp {
 
     pub startup_enabled: bool,
     pub context_menu_enabled: bool,
+    pub active_rail_tab: GuiRailTab,
+    pub transfer_history: Vec<HistoryRecord>,
 }
 
 fn collect_paths_recursive(paths: &[PathBuf]) -> Vec<PathBuf> {
@@ -270,6 +315,8 @@ impl DropItApp {
             quit_menu_id,
             startup_enabled,
             context_menu_enabled,
+            active_rail_tab: GuiRailTab::Transfers,
+            transfer_history: Vec::new(),
         }
     }
 
@@ -316,6 +363,7 @@ impl DropItApp {
                     filename,
                     size_bytes: size,
                     blake3_hash: None,
+                    sha256_hash: None,
                 });
             }
         }
@@ -597,6 +645,72 @@ impl eframe::App for DropItApp {
                                     *progress = 1.0;
                                     *status = FileTransferStatus::Completed;
                                     *local_path = Some(dest_path.clone());
+
+                                    let file_name = dest_path
+                                        .file_name()
+                                        .map(|f| f.to_string_lossy().to_string())
+                                        .unwrap_or_else(|| "Received File".into());
+                                    let size_bytes =
+                                        std::fs::metadata(&dest_path).map(|m| m.len()).unwrap_or(0);
+                                    self.transfer_history.push(HistoryRecord {
+                                        id: session_id.clone(),
+                                        filename: file_name,
+                                        size_bytes,
+                                        is_outgoing: false,
+                                        peer_name: "Incoming".into(),
+                                        time_str: Self::now_str(),
+                                        status: "Completed".into(),
+                                        local_path: Some(dest_path.clone()),
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+                GuiEvent::TransferPaused { session_id } => {
+                    for msgs in self.chat_history.values_mut() {
+                        for m in msgs.iter_mut() {
+                            if let ChatMessageKind::FileCard {
+                                session_id: s_id,
+                                status,
+                                ..
+                            } = &mut m.kind
+                            {
+                                if s_id == &session_id {
+                                    *status =
+                                        FileTransferStatus::Paused("Peer paused transfer".into());
+                                }
+                            }
+                        }
+                    }
+                }
+                GuiEvent::TransferResumed { session_id } => {
+                    for msgs in self.chat_history.values_mut() {
+                        for m in msgs.iter_mut() {
+                            if let ChatMessageKind::FileCard {
+                                session_id: s_id,
+                                status,
+                                ..
+                            } = &mut m.kind
+                            {
+                                if s_id == &session_id {
+                                    *status = FileTransferStatus::Transferring;
+                                }
+                            }
+                        }
+                    }
+                }
+                GuiEvent::TransferCancelled { session_id } => {
+                    for msgs in self.chat_history.values_mut() {
+                        for m in msgs.iter_mut() {
+                            if let ChatMessageKind::FileCard {
+                                session_id: s_id,
+                                status,
+                                ..
+                            } = &mut m.kind
+                            {
+                                if s_id == &session_id {
+                                    *status = FileTransferStatus::Cancelled;
                                 }
                             }
                         }
@@ -642,12 +756,12 @@ impl eframe::App for DropItApp {
                 GuiEvent::OutgoingTransferUpdate {
                     peer_id,
                     session_id,
+                    file_name,
                     bytes_transferred,
                     total_bytes,
                     speed_mb_s,
                     is_done,
                     error,
-                    ..
                 } => {
                     if let Some(msgs) = self.chat_history.get_mut(&peer_id) {
                         for m in msgs.iter_mut() {
@@ -669,12 +783,34 @@ impl eframe::App for DropItApp {
                                         if let Some(err) = error.clone() {
                                             if err.to_ascii_lowercase().contains("decline") {
                                                 *status = FileTransferStatus::Declined;
+                                            } else if err.to_ascii_lowercase().contains("connection") || err.to_ascii_lowercase().contains("reset") {
+                                                *status = FileTransferStatus::Paused("paused (connection lost)".into());
                                             } else {
-                                                *status = FileTransferStatus::Failed(err);
+                                                *status = FileTransferStatus::Failed(err.clone());
+                                                self.transfer_history.push(HistoryRecord {
+                                                    id: session_id.clone(),
+                                                    filename: file_name.clone(),
+                                                    size_bytes: total_bytes,
+                                                    is_outgoing: true,
+                                                    peer_name: peer_id.clone(),
+                                                    time_str: Self::now_str(),
+                                                    status: format!("Failed: {err}"),
+                                                    local_path: None,
+                                                });
                                             }
                                         } else {
                                             *status = FileTransferStatus::Completed;
                                             *progress = 1.0;
+                                            self.transfer_history.push(HistoryRecord {
+                                                id: session_id.clone(),
+                                                filename: file_name.clone(),
+                                                size_bytes: total_bytes,
+                                                is_outgoing: true,
+                                                peer_name: peer_id.clone(),
+                                                time_str: Self::now_str(),
+                                                status: "Completed".into(),
+                                                local_path: None,
+                                            });
                                         }
                                     }
                                 }
@@ -697,26 +833,59 @@ impl eframe::App for DropItApp {
             self.send_selected_files(dropped_files);
         }
 
-        // Main Layout: Left Sidebar + Right Chat Channel
+        // Visual theme adjustment
+        let is_dark = self.config.dark_theme;
+        let rail_bg = if is_dark {
+            egui::Color32::from_rgb(14, 16, 23)
+        } else {
+            egui::Color32::from_rgb(243, 244, 246)
+        };
+        let sidebar_bg = if is_dark {
+            egui::Color32::from_rgb(18, 21, 30)
+        } else {
+            egui::Color32::from_rgb(250, 250, 250)
+        };
+        let central_bg = if is_dark {
+            egui::Color32::from_rgb(12, 14, 20)
+        } else {
+            egui::Color32::WHITE
+        };
+        let border_stroke = egui::Stroke::new(
+            1.0,
+            if is_dark {
+                egui::Color32::from_rgb(28, 33, 46)
+            } else {
+                egui::Color32::from_rgb(229, 231, 235)
+            },
+        );
+
+        // 1. Narrow Icon Rail (Transfers, History, Favorites, Nearby, Settings)
+        egui::SidePanel::left("icon_rail")
+            .resizable(false)
+            .exact_width(58.0)
+            .frame(egui::Frame::NONE.fill(rail_bg).stroke(border_stroke))
+            .show(ctx, |ui| {
+                self.render_icon_rail(ui);
+            });
+
+        // 2. Device Sidebar (This device card, search, Favorites, Nearby)
         egui::SidePanel::left("sidebar_panel")
             .resizable(false)
-            .exact_width(290.0)
-            .frame(
-                egui::Frame::NONE
-                    .fill(egui::Color32::from_rgb(18, 20, 29))
-                    .stroke(egui::Stroke::new(
-                        1.0_f32,
-                        egui::Color32::from_rgb(28, 32, 46),
-                    )),
-            )
+            .exact_width(260.0)
+            .frame(egui::Frame::NONE.fill(sidebar_bg).stroke(border_stroke))
             .show(ctx, |ui| {
                 self.render_sidebar(ui);
             });
 
+        // 3. Main Panel (Based on active rail tab)
         egui::CentralPanel::default()
-            .frame(egui::Frame::NONE.fill(egui::Color32::from_rgb(13, 15, 22)))
-            .show(ctx, |ui| {
-                self.render_chat_area(ui);
+            .frame(egui::Frame::NONE.fill(central_bg))
+            .show(ctx, |ui| match self.active_rail_tab {
+                GuiRailTab::Transfers => self.render_chat_area(ui),
+                GuiRailTab::History => self.render_history_area(ui),
+                GuiRailTab::Favorites => self.render_favorites_area(ui),
+                GuiRailTab::Nearby => self.render_nearby_area(ui),
+                GuiRailTab::Settings => self.render_settings_area(ui),
             });
 
         // Modals
@@ -733,74 +902,172 @@ impl eframe::App for DropItApp {
 }
 
 impl DropItApp {
+    fn render_icon_rail(&mut self, ui: &mut egui::Ui) {
+        ui.add_space(14.0);
+        // App circular logo
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(36.0, 36.0), egui::Sense::hover());
+        ui.painter()
+            .circle_filled(rect.center(), 18.0, egui::Color32::from_rgb(37, 99, 235));
+        ui.painter().text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            "↓",
+            egui::FontId::proportional(20.0),
+            egui::Color32::WHITE,
+        );
+        ui.add_space(20.0);
+
+        let tabs = [
+            (GuiRailTab::Transfers, "⇄", "Transfers"),
+            (GuiRailTab::History, "🕒", "History"),
+            (GuiRailTab::Favorites, "⭐", "Favorites"),
+            (GuiRailTab::Nearby, "📡", "Nearby"),
+            (GuiRailTab::Settings, "⚙", "Settings"),
+        ];
+
+        for (tab, icon, label) in tabs {
+            let is_selected = self.active_rail_tab == tab;
+            let (btn_rect, response) =
+                ui.allocate_exact_size(egui::vec2(42.0, 42.0), egui::Sense::click());
+            let bg_color = if is_selected {
+                egui::Color32::from_rgb(37, 99, 235)
+            } else if response.hovered() {
+                if self.config.dark_theme {
+                    egui::Color32::from_rgb(30, 36, 52)
+                } else {
+                    egui::Color32::from_rgb(229, 231, 235)
+                }
+            } else {
+                egui::Color32::TRANSPARENT
+            };
+            ui.painter().rect_filled(btn_rect, 8.0, bg_color);
+            let text_color = if is_selected {
+                egui::Color32::WHITE
+            } else if self.config.dark_theme {
+                egui::Color32::from_rgb(156, 163, 175)
+            } else {
+                egui::Color32::from_rgb(107, 114, 128)
+            };
+            ui.painter().text(
+                btn_rect.center(),
+                egui::Align2::CENTER_CENTER,
+                icon,
+                egui::FontId::proportional(17.0),
+                text_color,
+            );
+            if response.on_hover_text(label).clicked() {
+                self.active_rail_tab = tab;
+            }
+            ui.add_space(6.0);
+        }
+
+        // Bottom controls: Theme toggle + QR Code
+        ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
+            ui.add_space(14.0);
+            if ui
+                .add(egui::Button::new(egui::RichText::new("📱").size(16.0)).frame(false))
+                .on_hover_text("Open Mobile Web UI (QR Code)")
+                .clicked()
+            {
+                self.show_qr = true;
+            }
+            ui.add_space(10.0);
+            let theme_icon = if self.config.dark_theme { "☀️" } else { "🌙" };
+            let theme_label = if self.config.dark_theme {
+                "Switch to Light Theme"
+            } else {
+                "Switch to Dark Theme"
+            };
+            if ui
+                .add(egui::Button::new(egui::RichText::new(theme_icon).size(16.0)).frame(false))
+                .on_hover_text(theme_label)
+                .clicked()
+            {
+                self.config.dark_theme = !self.config.dark_theme;
+                let _ = self.config.save();
+            }
+        });
+    }
+
     fn render_sidebar(&mut self, ui: &mut egui::Ui) {
         ui.add_space(14.0);
 
-        // Header: Logo + Title + Device Status + Settings Icon
-        ui.horizontal(|ui| {
-            ui.add_space(12.0);
-            // Circular logo icon
-            let (rect, _) = ui.allocate_exact_size(egui::vec2(32.0, 32.0), egui::Sense::hover());
-            ui.painter()
-                .circle_filled(rect.center(), 16.0, egui::Color32::from_rgb(79, 70, 229));
-            ui.painter().text(
-                rect.center(),
-                egui::Align2::CENTER_CENTER,
-                "↓",
-                egui::FontId::proportional(18.0),
-                egui::Color32::WHITE,
-            );
+        let is_dark = self.config.dark_theme;
+        let card_bg = if is_dark {
+            egui::Color32::from_rgb(24, 28, 40)
+        } else {
+            egui::Color32::from_rgb(243, 244, 246)
+        };
+        let text_color = if is_dark {
+            egui::Color32::WHITE
+        } else {
+            egui::Color32::from_rgb(17, 24, 39)
+        };
+        let subtext_color = if is_dark {
+            egui::Color32::from_rgb(156, 163, 175)
+        } else {
+            egui::Color32::from_rgb(107, 114, 128)
+        };
 
-            ui.add_space(8.0);
-            ui.vertical(|ui| {
-                ui.horizontal(|ui| {
+        // "This Device" Card
+        ui.horizontal(|ui| {
+            ui.add_space(10.0);
+            egui::Frame::NONE
+                .fill(card_bg)
+                .corner_radius(12.0)
+                .inner_margin(egui::Margin::symmetric(14, 10))
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width() - 20.0);
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            egui::RichText::new("💻 This Device")
+                                .size(13.0)
+                                .strong()
+                                .color(text_color),
+                        );
+                        let (dot_rect, _) =
+                            ui.allocate_exact_size(egui::vec2(8.0, 8.0), egui::Sense::hover());
+                        ui.painter().circle_filled(
+                            dot_rect.center(),
+                            4.0,
+                            if self.config.visible_to_nearby {
+                                egui::Color32::from_rgb(16, 185, 129)
+                            } else {
+                                egui::Color32::from_rgb(156, 163, 175)
+                            },
+                        );
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let mut visible = self.config.visible_to_nearby;
+                            if ui
+                                .checkbox(&mut visible, "")
+                                .on_hover_text("Visible to nearby devices")
+                                .changed()
+                            {
+                                self.config.visible_to_nearby = visible;
+                                let _ = self.config.save();
+                            }
+                        });
+                    });
+                    ui.add_space(2.0);
                     ui.label(
-                        egui::RichText::new("Drop It")
-                            .size(17.0)
-                            .strong()
-                            .color(egui::Color32::WHITE),
+                        egui::RichText::new(&self.config.device_name)
+                            .size(12.0)
+                            .color(subtext_color),
                     );
-                    // Online green dot
-                    let (dot_rect, _) =
-                        ui.allocate_exact_size(egui::vec2(8.0, 8.0), egui::Sense::hover());
-                    ui.painter().circle_filled(
-                        dot_rect.center(),
-                        4.0,
-                        egui::Color32::from_rgb(16, 185, 129),
+                    ui.label(
+                        egui::RichText::new(format!("Port: {}", self.config.port))
+                            .size(10.5)
+                            .color(subtext_color),
                     );
                 });
-                ui.label(
-                    egui::RichText::new(&self.config.device_name)
-                        .size(11.0)
-                        .color(egui::Color32::from_rgb(156, 163, 175)),
-                );
-            });
-
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.add_space(10.0);
-                if ui
-                    .add(egui::Button::new(egui::RichText::new("⚙").size(16.0)).frame(false))
-                    .on_hover_text("Settings")
-                    .clicked()
-                {
-                    self.show_settings = true;
-                }
-                if ui
-                    .add(egui::Button::new(egui::RichText::new("📱").size(15.0)).frame(false))
-                    .on_hover_text("Open on Phone (QR Code)")
-                    .clicked()
-                {
-                    self.show_qr = true;
-                }
-            });
         });
 
-        ui.add_space(14.0);
+        ui.add_space(12.0);
 
         // Search Bar
         ui.horizontal(|ui| {
-            ui.add_space(12.0);
-            let width = ui.available_width() - 12.0;
+            ui.add_space(10.0);
+            let width = ui.available_width() - 10.0;
             ui.add_sized(
                 [width, 32.0],
                 egui::TextEdit::singleline(&mut self.search_query)
@@ -809,7 +1076,7 @@ impl DropItApp {
             );
         });
 
-        ui.add_space(12.0);
+        ui.add_space(10.0);
         ui.separator();
 
         // Device List Scroll
@@ -1313,9 +1580,55 @@ impl DropItApp {
         // Check if files are currently being dragged over window
         let is_hovering = ui.input(|i| !i.raw.hovered_files.is_empty());
 
+        // Permanent Dashed Drop Zone
+        ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            ui.add_space(14.0);
+            let (drop_rect, drop_resp) = ui.allocate_exact_size(
+                egui::vec2(ui.available_width() - 28.0, 56.0),
+                egui::Sense::click(),
+            );
+            let is_dark = self.config.dark_theme;
+            let drop_bg = if is_hovering || drop_resp.hovered() {
+                if is_dark {
+                    egui::Color32::from_rgb(30, 42, 68)
+                } else {
+                    egui::Color32::from_rgb(239, 246, 255)
+                }
+            } else if is_dark {
+                egui::Color32::from_rgb(18, 22, 32)
+            } else {
+                egui::Color32::from_rgb(249, 250, 251)
+            };
+            ui.painter().rect_filled(drop_rect, 10.0, drop_bg);
+            ui.painter().rect_stroke(
+                drop_rect,
+                10.0,
+                egui::Stroke::new(1.5_f32, egui::Color32::from_rgb(37, 99, 235)),
+                egui::StrokeKind::Middle,
+            );
+            ui.painter().text(
+                drop_rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "📥 Drop files or folders here (sends immediately)",
+                egui::FontId::proportional(13.0),
+                if is_dark {
+                    egui::Color32::from_rgb(147, 197, 253)
+                } else {
+                    egui::Color32::from_rgb(29, 78, 216)
+                },
+            );
+            if drop_resp.clicked() {
+                if let Some(files) = rfd::FileDialog::new().pick_files() {
+                    self.send_selected_files(files);
+                }
+            }
+        });
+        ui.add_space(6.0);
+
         // Chat Timeline
         let available_h = ui.available_height() - 65.0; // leave room for input bar
-        let mut decision_to_make: Option<(String, bool)> = None;
+        let mut bubble_action_to_apply: Option<BubbleAction> = None;
 
         egui::ScrollArea::vertical()
             .auto_shrink([false; 2])
@@ -1371,8 +1684,8 @@ impl DropItApp {
                 if let Some(messages) = self.chat_history.get(&selected_id) {
                     let msgs_clone = messages.clone();
                     for msg in msgs_clone {
-                        if let Some(dec) = self.render_chat_bubble(ui, &msg) {
-                            decision_to_make = Some(dec);
+                        if let Some(action) = self.render_chat_bubble(ui, &msg) {
+                            bubble_action_to_apply = Some(action);
                         }
                         ui.add_space(8.0);
                     }
@@ -1435,32 +1748,70 @@ impl DropItApp {
                 }
             });
 
-        // Apply any transfer decision made in this frame
-        if let Some((sess_id, accepted)) = decision_to_make {
-            if let Some(msgs) = self.chat_history.get_mut(&selected_id) {
-                for m in msgs.iter_mut() {
-                    if let ChatMessageKind::FileCard {
-                        session_id,
-                        status,
-                        decision_tx,
-                        ..
-                    } = &mut m.kind
-                    {
-                        if session_id == &sess_id {
-                            *status = if accepted {
-                                FileTransferStatus::Transferring
-                            } else {
-                                FileTransferStatus::Declined
-                            };
-                            if let Some(tx_arc) = decision_tx.take() {
-                                tokio::spawn(async move {
-                                    let mut lock = tx_arc.lock().await;
-                                    if let Some(tx) = lock.take() {
-                                        let _ = tx.send(accepted);
+        // Apply any transfer decision or control command made in this frame
+        if let Some(action) = bubble_action_to_apply {
+            match action {
+                BubbleAction::Decision(sess_id, accepted) => {
+                    if let Some(msgs) = self.chat_history.get_mut(&selected_id) {
+                        for m in msgs.iter_mut() {
+                            if let ChatMessageKind::FileCard {
+                                session_id,
+                                status,
+                                decision_tx,
+                                ..
+                            } = &mut m.kind
+                            {
+                                if session_id == &sess_id {
+                                    *status = if accepted {
+                                        FileTransferStatus::Transferring
+                                    } else {
+                                        FileTransferStatus::Declined
+                                    };
+                                    if let Some(tx_arc) = decision_tx.take() {
+                                        tokio::spawn(async move {
+                                            let mut lock = tx_arc.lock().await;
+                                            if let Some(tx) = lock.take() {
+                                                let _ = tx.send(accepted);
+                                            }
+                                        });
                                     }
-                                });
+                                }
                             }
                         }
+                    }
+                }
+                BubbleAction::Control(sess_id, cmd) => {
+                    if let Some(msgs) = self.chat_history.get_mut(&selected_id) {
+                        for m in msgs.iter_mut() {
+                            if let ChatMessageKind::FileCard {
+                                session_id,
+                                status,
+                                ..
+                            } = &mut m.kind
+                            {
+                                if session_id == &sess_id {
+                                    match cmd {
+                                        crate::transfer::TransferControlCommand::Pause => {
+                                            *status =
+                                                FileTransferStatus::Paused("Paused by user".into());
+                                        }
+                                        crate::transfer::TransferControlCommand::Resume => {
+                                            *status = FileTransferStatus::Transferring;
+                                        }
+                                        crate::transfer::TransferControlCommand::Cancel => {
+                                            *status = FileTransferStatus::Cancelled;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if let Some(p) = self.peers.get(&selected_id) {
+                        let _ = self.tx_actions.try_send(GuiAction::TransferControl {
+                            target_addr: p.addr.clone(),
+                            session_id: sess_id,
+                            command: cmd,
+                        });
                     }
                 }
             }
@@ -1515,6 +1866,31 @@ impl DropItApp {
                         }
                     }
 
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                egui::RichText::new("📋")
+                                    .size(17.0)
+                                    .color(egui::Color32::from_rgb(156, 163, 175)),
+                            )
+                            .frame(false)
+                            .min_size(egui::vec2(32.0, 32.0)),
+                        )
+                        .on_hover_text("Paste & Send Clipboard Text/Link")
+                        .clicked()
+                    {
+                        if let Ok(out) = std::process::Command::new("powershell")
+                            .args(["-NoProfile", "-Command", "Get-Clipboard"])
+                            .output()
+                        {
+                            let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                            if !text.is_empty() {
+                                self.text_input = text;
+                                self.send_current_message();
+                            }
+                        }
+                    }
+
                     let input_w = ui.available_width() - 48.0;
                     let text_edit = ui.add_sized(
                         [input_w, 32.0],
@@ -1551,7 +1927,7 @@ impl DropItApp {
         &mut self,
         ui: &mut egui::Ui,
         msg: &ChatMessage,
-    ) -> Option<(String, bool)> {
+    ) -> Option<BubbleAction> {
         let is_me = msg.is_me;
         let align = if is_me {
             egui::Align::Max
@@ -1559,7 +1935,7 @@ impl DropItApp {
             egui::Align::Min
         };
 
-        let mut decision_result: Option<(String, bool)> = None;
+        let mut bubble_action: Option<BubbleAction> = None;
 
         ui.with_layout(egui::Layout::top_down(align), |ui| {
             let max_w = 440.0;
@@ -1706,7 +2082,7 @@ impl DropItApp {
                                             )
                                             .clicked()
                                         {
-                                            decision_result = Some((session_id.clone(), true));
+                                            bubble_action = Some(BubbleAction::Decision(session_id.clone(), true));
                                         }
 
                                         if ui
@@ -1728,7 +2104,7 @@ impl DropItApp {
                                             )
                                             .clicked()
                                         {
-                                            decision_result = Some((session_id.clone(), false));
+                                            bubble_action = Some(BubbleAction::Decision(session_id.clone(), false));
                                         }
                                     });
                                 }
@@ -1741,10 +2117,18 @@ impl DropItApp {
                                     );
                                     ui.add_space(2.0);
                                     ui.horizontal(|ui| {
+                                        let remaining_bytes =
+                                            (*total_bytes as f64 * (1.0 - *progress as f64)).max(0.0) as u64;
+                                        let eta_secs = if *speed_mb_s > 0.05 {
+                                            (remaining_bytes as f64 / (*speed_mb_s * 1024.0 * 1024.0))
+                                                as u64
+                                        } else {
+                                            0
+                                        };
                                         ui.label(
                                             egui::RichText::new(format!(
-                                                "⚡ {:.1} MB/s",
-                                                speed_mb_s
+                                                "⚡ {:.1} MB/s  •  ETA: {}s",
+                                                speed_mb_s, eta_secs
                                             ))
                                             .size(11.5)
                                             .strong()
@@ -1753,17 +2137,90 @@ impl DropItApp {
                                         ui.with_layout(
                                             egui::Layout::right_to_left(egui::Align::Center),
                                             |ui| {
-                                                ui.label(
-                                                    egui::RichText::new(format!(
-                                                        "{:.0}%",
-                                                        progress * 100.0
-                                                    ))
-                                                    .size(11.0)
-                                                    .color(egui::Color32::from_rgb(209, 213, 219)),
-                                                );
+                                                if ui
+                                                    .add(
+                                                        egui::Button::new(
+                                                            egui::RichText::new("✕ Cancel")
+                                                                .size(10.5)
+                                                                .color(egui::Color32::from_rgb(
+                                                                    248, 113, 113,
+                                                                )),
+                                                        )
+                                                        .corner_radius(6.0)
+                                                        .fill(egui::Color32::from_rgb(45, 25, 30)),
+                                                    )
+                                                    .clicked()
+                                                {
+                                                    bubble_action = Some(BubbleAction::Control(session_id.clone(), crate::transfer::TransferControlCommand::Cancel));
+                                                }
+                                                if ui
+                                                    .add(
+                                                        egui::Button::new(
+                                                            egui::RichText::new("⏸ Pause").size(10.5),
+                                                        )
+                                                        .corner_radius(6.0)
+                                                        .fill(egui::Color32::from_rgb(45, 52, 75)),
+                                                    )
+                                                    .clicked()
+                                                {
+                                                    bubble_action = Some(BubbleAction::Control(session_id.clone(), crate::transfer::TransferControlCommand::Pause));
+                                                }
                                             },
                                         );
                                     });
+                                }
+
+                                FileTransferStatus::Paused(reason) => {
+                                    ui.horizontal(|ui| {
+                                        ui.label(
+                                            egui::RichText::new(format!("⏸ {reason}"))
+                                                .size(11.5)
+                                                .color(egui::Color32::from_rgb(251, 191, 36)),
+                                        );
+                                        ui.with_layout(
+                                            egui::Layout::right_to_left(egui::Align::Center),
+                                            |ui| {
+                                                if ui
+                                                    .add(
+                                                        egui::Button::new(
+                                                            egui::RichText::new("✕ Cancel")
+                                                                .size(10.5)
+                                                                .color(egui::Color32::from_rgb(
+                                                                    248, 113, 113,
+                                                                )),
+                                                        )
+                                                        .corner_radius(6.0)
+                                                        .fill(egui::Color32::from_rgb(45, 25, 30)),
+                                                    )
+                                                    .clicked()
+                                                {
+                                                    bubble_action = Some(BubbleAction::Control(session_id.clone(), crate::transfer::TransferControlCommand::Cancel));
+                                                }
+                                                if ui
+                                                    .add(
+                                                        egui::Button::new(
+                                                            egui::RichText::new("▶ Resume")
+                                                                .size(10.5)
+                                                                .color(egui::Color32::WHITE),
+                                                        )
+                                                        .corner_radius(6.0)
+                                                        .fill(egui::Color32::from_rgb(37, 99, 235)),
+                                                    )
+                                                    .clicked()
+                                                {
+                                                    bubble_action = Some(BubbleAction::Control(session_id.clone(), crate::transfer::TransferControlCommand::Resume));
+                                                }
+                                            },
+                                        );
+                                    });
+                                }
+
+                                FileTransferStatus::Cancelled => {
+                                    ui.label(
+                                        egui::RichText::new("Transfer Cancelled ✕")
+                                            .size(11.5)
+                                            .color(egui::Color32::from_rgb(156, 163, 175)),
+                                    );
                                 }
 
                                 FileTransferStatus::Completed => {
@@ -1838,7 +2295,7 @@ impl DropItApp {
                 });
         });
 
-        decision_result
+        bubble_action
     }
 
     fn render_settings_modal(&mut self, ctx: &egui::Context) {
@@ -1934,6 +2391,552 @@ impl DropItApp {
                     }
                 });
             });
+    }
+
+    fn render_history_area(&mut self, ui: &mut egui::Ui) {
+        let is_dark = self.config.dark_theme;
+        let text_color = if is_dark {
+            egui::Color32::WHITE
+        } else {
+            egui::Color32::from_rgb(17, 24, 39)
+        };
+        let subtext_color = if is_dark {
+            egui::Color32::from_rgb(156, 163, 175)
+        } else {
+            egui::Color32::from_rgb(107, 114, 128)
+        };
+        let card_bg = if is_dark {
+            egui::Color32::from_rgb(20, 24, 34)
+        } else {
+            egui::Color32::from_rgb(249, 250, 251)
+        };
+        let card_stroke = egui::Stroke::new(
+            1.0,
+            if is_dark {
+                egui::Color32::from_rgb(32, 38, 54)
+            } else {
+                egui::Color32::from_rgb(229, 231, 235)
+            },
+        );
+
+        ui.add_space(14.0);
+        ui.horizontal(|ui| {
+            ui.add_space(16.0);
+            ui.label(
+                egui::RichText::new("🕒 Transfer History")
+                    .size(18.0)
+                    .strong()
+                    .color(text_color),
+            );
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.add_space(16.0);
+                if ui
+                    .add(
+                        egui::Button::new(
+                            egui::RichText::new("Clear history").size(12.0),
+                        )
+                        .corner_radius(6.0)
+                        .fill(if is_dark {
+                            egui::Color32::from_rgb(37, 45, 64)
+                        } else {
+                            egui::Color32::from_rgb(229, 231, 235)
+                        }),
+                    )
+                    .clicked()
+                {
+                    self.transfer_history.clear();
+                }
+            });
+        });
+        ui.add_space(12.0);
+        ui.separator();
+
+        if self.transfer_history.is_empty() {
+            ui.vertical_centered(|ui| {
+                ui.add_space(60.0);
+                ui.label(
+                    egui::RichText::new("No transfers recorded yet")
+                        .size(14.0)
+                        .color(subtext_color),
+                );
+            });
+        } else {
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                ui.add_space(10.0);
+                for item in self.transfer_history.iter().rev() {
+                    ui.horizontal(|ui| {
+                        ui.add_space(16.0);
+                        egui::Frame::NONE
+                            .fill(card_bg)
+                            .stroke(card_stroke)
+                            .corner_radius(12.0)
+                            .inner_margin(egui::Margin::symmetric(16, 12))
+                            .show(ui, |ui| {
+                                ui.set_width(ui.available_width() - 32.0);
+                                ui.horizontal(|ui| {
+                                    let icon = get_file_type_icon(&item.filename);
+                                    ui.label(egui::RichText::new(icon).size(22.0));
+                                    ui.add_space(6.0);
+                                    ui.vertical(|ui| {
+                                        ui.label(
+                                            egui::RichText::new(&item.filename)
+                                                .size(13.5)
+                                                .strong()
+                                                .color(text_color),
+                                        );
+                                        ui.label(
+                                            egui::RichText::new(format!(
+                                                "{}  •  {}  •  {}",
+                                                format_bytes(item.size_bytes),
+                                                item.time_str,
+                                                item.status
+                                            ))
+                                            .size(11.0)
+                                            .color(subtext_color),
+                                        );
+                                    });
+                                    ui.with_layout(
+                                        egui::Layout::right_to_left(egui::Align::Center),
+                                        |ui| {
+                                            if let Some(ref path) = item.local_path {
+                                                let p1 = path.clone();
+                                                if ui.button("Open file").clicked() {
+                                                    platform::open_file(&p1);
+                                                }
+                                                let p2 = path.clone();
+                                                if ui.button("Show in folder").clicked() {
+                                                    platform::open_in_folder(&p2);
+                                                }
+                                            }
+                                        },
+                                    );
+                                });
+                            });
+                    });
+                    ui.add_space(8.0);
+                }
+            });
+        }
+    }
+
+    fn render_favorites_area(&mut self, ui: &mut egui::Ui) {
+        let is_dark = self.config.dark_theme;
+        let text_color = if is_dark {
+            egui::Color32::WHITE
+        } else {
+            egui::Color32::from_rgb(17, 24, 39)
+        };
+        let subtext_color = if is_dark {
+            egui::Color32::from_rgb(156, 163, 175)
+        } else {
+            egui::Color32::from_rgb(107, 114, 128)
+        };
+        let card_bg = if is_dark {
+            egui::Color32::from_rgb(20, 24, 34)
+        } else {
+            egui::Color32::from_rgb(249, 250, 251)
+        };
+        let card_stroke = egui::Stroke::new(
+            1.0,
+            if is_dark {
+                egui::Color32::from_rgb(32, 38, 54)
+            } else {
+                egui::Color32::from_rgb(229, 231, 235)
+            },
+        );
+
+        ui.add_space(14.0);
+        ui.horizontal(|ui| {
+            ui.add_space(16.0);
+            ui.label(
+                egui::RichText::new("⭐ Favorite Devices")
+                    .size(18.0)
+                    .strong()
+                    .color(text_color),
+            );
+        });
+        ui.add_space(12.0);
+        ui.separator();
+
+        let favs: Vec<GuiPeer> = self
+            .peers
+            .values()
+            .filter(|p| self.config.is_favorite(&p.id))
+            .cloned()
+            .collect();
+        if favs.is_empty() {
+            ui.vertical_centered(|ui| {
+                ui.add_space(60.0);
+                ui.label(
+                    egui::RichText::new(
+                        "No favorite devices yet. Click the ⭐ next to any device to add it.",
+                    )
+                    .size(13.5)
+                    .color(subtext_color),
+                );
+            });
+        } else {
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                ui.add_space(10.0);
+                for peer in favs {
+                    ui.horizontal(|ui| {
+                        ui.add_space(16.0);
+                        egui::Frame::NONE
+                            .fill(card_bg)
+                            .stroke(card_stroke)
+                            .corner_radius(12.0)
+                            .inner_margin(egui::Margin::symmetric(16, 12))
+                            .show(ui, |ui| {
+                                ui.set_width(ui.available_width() - 32.0);
+                                ui.horizontal(|ui| {
+                                    let initial = peer
+                                        .name
+                                        .chars()
+                                        .next()
+                                        .unwrap_or('?')
+                                        .to_uppercase()
+                                        .to_string();
+                                    let (rect, _) = ui.allocate_exact_size(
+                                        egui::vec2(32.0, 32.0),
+                                        egui::Sense::hover(),
+                                    );
+                                    ui.painter().circle_filled(
+                                        rect.center(),
+                                        16.0,
+                                        color_for_name(&peer.name),
+                                    );
+                                    ui.painter().text(
+                                        rect.center(),
+                                        egui::Align2::CENTER_CENTER,
+                                        initial,
+                                        egui::FontId::proportional(14.0),
+                                        egui::Color32::WHITE,
+                                    );
+                                    ui.add_space(8.0);
+                                    ui.vertical(|ui| {
+                                        ui.label(
+                                            egui::RichText::new(&peer.name)
+                                                .size(14.0)
+                                                .strong()
+                                                .color(text_color),
+                                        );
+                                        ui.label(
+                                            egui::RichText::new(format!(
+                                                "{}  •  {}",
+                                                peer.addr,
+                                                if peer.is_online {
+                                                    "🟢 Online"
+                                                } else {
+                                                    "Offline"
+                                                }
+                                            ))
+                                            .size(11.0)
+                                            .color(subtext_color),
+                                        );
+                                    });
+                                    ui.with_layout(
+                                        egui::Layout::right_to_left(egui::Align::Center),
+                                        |ui| {
+                                            let mut auto_acc = self
+                                                .config
+                                                .is_auto_accept_for_favorite(&peer.id);
+                                            if ui.checkbox(&mut auto_acc, "Auto-accept").changed() {
+                                                self.config
+                                                    .set_auto_accept_for_favorite(&peer.id, auto_acc);
+                                                let _ = self.config.save();
+                                            }
+                                            if ui.button("Send files").clicked() {
+                                                self.selected_peer_id = Some(peer.id.clone());
+                                                self.active_rail_tab = GuiRailTab::Transfers;
+                                                if let Some(files) =
+                                                    rfd::FileDialog::new().pick_files()
+                                                {
+                                                    self.send_selected_files(files);
+                                                }
+                                            }
+                                        },
+                                    );
+                                });
+                            });
+                    });
+                    ui.add_space(8.0);
+                }
+            });
+        }
+    }
+
+    fn render_nearby_area(&mut self, ui: &mut egui::Ui) {
+        let is_dark = self.config.dark_theme;
+        let text_color = if is_dark {
+            egui::Color32::WHITE
+        } else {
+            egui::Color32::from_rgb(17, 24, 39)
+        };
+        let subtext_color = if is_dark {
+            egui::Color32::from_rgb(156, 163, 175)
+        } else {
+            egui::Color32::from_rgb(107, 114, 128)
+        };
+        let card_bg = if is_dark {
+            egui::Color32::from_rgb(20, 24, 34)
+        } else {
+            egui::Color32::from_rgb(249, 250, 251)
+        };
+        let card_stroke = egui::Stroke::new(
+            1.0,
+            if is_dark {
+                egui::Color32::from_rgb(32, 38, 54)
+            } else {
+                egui::Color32::from_rgb(229, 231, 235)
+            },
+        );
+
+        ui.add_space(14.0);
+        ui.horizontal(|ui| {
+            ui.add_space(16.0);
+            ui.label(
+                egui::RichText::new("📡 Nearby Discovered Devices")
+                    .size(18.0)
+                    .strong()
+                    .color(text_color),
+            );
+        });
+        ui.add_space(12.0);
+        ui.separator();
+
+        let online: Vec<GuiPeer> = self.peers.values().filter(|p| p.is_online).cloned().collect();
+        if online.is_empty() {
+            ui.vertical_centered(|ui| {
+                ui.add_space(60.0);
+                ui.label(
+                    egui::RichText::new("Searching for devices on same WiFi...")
+                        .size(13.5)
+                        .color(subtext_color),
+                );
+            });
+        } else {
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                ui.add_space(10.0);
+                for peer in online {
+                    let pairing_code = crypto::generate_pairing_code(
+                        &self.identity.fingerprint,
+                        &peer.fingerprint,
+                    );
+                    ui.horizontal(|ui| {
+                        ui.add_space(16.0);
+                        egui::Frame::NONE
+                            .fill(card_bg)
+                            .stroke(card_stroke)
+                            .corner_radius(12.0)
+                            .inner_margin(egui::Margin::symmetric(16, 12))
+                            .show(ui, |ui| {
+                                ui.set_width(ui.available_width() - 32.0);
+                                ui.horizontal(|ui| {
+                                    let initial = peer
+                                        .name
+                                        .chars()
+                                        .next()
+                                        .unwrap_or('?')
+                                        .to_uppercase()
+                                        .to_string();
+                                    let (rect, _) = ui.allocate_exact_size(
+                                        egui::vec2(32.0, 32.0),
+                                        egui::Sense::hover(),
+                                    );
+                                    ui.painter().circle_filled(
+                                        rect.center(),
+                                        16.0,
+                                        color_for_name(&peer.name),
+                                    );
+                                    ui.painter().text(
+                                        rect.center(),
+                                        egui::Align2::CENTER_CENTER,
+                                        initial,
+                                        egui::FontId::proportional(14.0),
+                                        egui::Color32::WHITE,
+                                    );
+                                    ui.add_space(8.0);
+                                    ui.vertical(|ui| {
+                                        ui.label(
+                                            egui::RichText::new(&peer.name)
+                                                .size(14.0)
+                                                .strong()
+                                                .color(text_color),
+                                        );
+                                        ui.label(
+                                            egui::RichText::new(format!(
+                                                "{}  •  Pairing Code: [{}]",
+                                                peer.addr, pairing_code
+                                            ))
+                                            .size(11.0)
+                                            .color(subtext_color),
+                                        );
+                                    });
+                                    ui.with_layout(
+                                        egui::Layout::right_to_left(egui::Align::Center),
+                                        |ui| {
+                                            if ui.button("Connect & Send").clicked() {
+                                                self.selected_peer_id = Some(peer.id.clone());
+                                                self.active_rail_tab = GuiRailTab::Transfers;
+                                            }
+                                        },
+                                    );
+                                });
+                            });
+                    });
+                    ui.add_space(8.0);
+                }
+            });
+        }
+    }
+
+    fn render_settings_area(&mut self, ui: &mut egui::Ui) {
+        let is_dark = self.config.dark_theme;
+        let text_color = if is_dark {
+            egui::Color32::WHITE
+        } else {
+            egui::Color32::from_rgb(17, 24, 39)
+        };
+        let card_bg = if is_dark {
+            egui::Color32::from_rgb(20, 24, 34)
+        } else {
+            egui::Color32::from_rgb(249, 250, 251)
+        };
+        let card_stroke = egui::Stroke::new(
+            1.0,
+            if is_dark {
+                egui::Color32::from_rgb(32, 38, 54)
+            } else {
+                egui::Color32::from_rgb(229, 231, 235)
+            },
+        );
+
+        ui.add_space(14.0);
+        ui.horizontal(|ui| {
+            ui.add_space(16.0);
+            ui.label(
+                egui::RichText::new("⚙ Application Settings")
+                    .size(18.0)
+                    .strong()
+                    .color(text_color),
+            );
+        });
+        ui.add_space(12.0);
+        ui.separator();
+
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            ui.add_space(14.0);
+            ui.horizontal(|ui| {
+                ui.add_space(16.0);
+                egui::Frame::NONE
+                    .fill(card_bg)
+                    .stroke(card_stroke)
+                    .corner_radius(12.0)
+                    .inner_margin(egui::Margin::symmetric(18, 16))
+                    .show(ui, |ui| {
+                        ui.set_width(ui.available_width() - 32.0);
+                        ui.label(
+                            egui::RichText::new("Device Identity")
+                                .size(14.0)
+                                .strong()
+                                .color(text_color),
+                        );
+                        ui.add_space(8.0);
+                        ui.horizontal(|ui| {
+                            ui.label("Device name:");
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.config.device_name)
+                                    .desired_width(220.0),
+                            );
+                            if ui.button("Save").clicked() {
+                                let _ = self.config.save();
+                            }
+                        });
+                        ui.add_space(12.0);
+                        ui.separator();
+                        ui.add_space(12.0);
+
+                        ui.label(
+                            egui::RichText::new("Save Location")
+                                .size(14.0)
+                                .strong()
+                                .color(text_color),
+                        );
+                        ui.add_space(8.0);
+                        ui.horizontal(|ui| {
+                            ui.label(format!("Path: {}", self.config.download_dir.display()));
+                            if ui.button("Browse...").clicked() {
+                                if let Some(folder) = rfd::FileDialog::new().pick_folder() {
+                                    self.config.download_dir = folder;
+                                    let _ = self.config.save();
+                                }
+                            }
+                        });
+                        ui.add_space(12.0);
+                        ui.separator();
+                        ui.add_space(12.0);
+
+                        ui.label(
+                            egui::RichText::new("Preferences")
+                                .size(14.0)
+                                .strong()
+                                .color(text_color),
+                        );
+                        ui.add_space(8.0);
+                        if ui
+                            .checkbox(
+                                &mut self.config.auto_accept_trusted,
+                                "Auto-accept files from trusted devices",
+                            )
+                            .changed()
+                        {
+                            let _ = self.config.save();
+                        }
+                        if ui
+                            .checkbox(
+                                &mut self.config.visible_to_nearby,
+                                "Visible to nearby devices",
+                            )
+                            .changed()
+                        {
+                            let _ = self.config.save();
+                        }
+                        if ui
+                            .checkbox(
+                                &mut self.config.minimize_to_tray,
+                                "Minimize to system tray on close",
+                            )
+                            .changed()
+                        {
+                            let _ = self.config.save();
+                        }
+                        if ui
+                            .checkbox(&mut self.config.dark_theme, "Use Dark Theme")
+                            .changed()
+                        {
+                            let _ = self.config.save();
+                        }
+                        if ui
+                            .checkbox(
+                                &mut self.startup_enabled,
+                                "Launch Drop It when Windows starts",
+                            )
+                            .changed()
+                        {
+                            let _ = platform::set_run_on_startup(self.startup_enabled);
+                        }
+                        if ui
+                            .checkbox(
+                                &mut self.context_menu_enabled,
+                                "Add 'Send with Drop It' to Windows Explorer right-click menu",
+                            )
+                            .changed()
+                        {
+                            let _ = platform::set_context_menu_enabled(self.context_menu_enabled);
+                        }
+                    });
+            });
+        });
     }
 
     fn render_qr_modal(&mut self, ctx: &egui::Context) {
@@ -2074,6 +3077,15 @@ pub async fn run_gui_app(
                         sender_name,
                         text,
                     });
+                }
+                WebSseEvent::TransferPaused { session_id } => {
+                    let _ = tx_sse.send(GuiEvent::TransferPaused { session_id });
+                }
+                WebSseEvent::TransferResumed { session_id } => {
+                    let _ = tx_sse.send(GuiEvent::TransferResumed { session_id });
+                }
+                WebSseEvent::TransferCancelled { session_id } => {
+                    let _ = tx_sse.send(GuiEvent::TransferCancelled { session_id });
                 }
                 _ => {}
             }
@@ -2235,6 +3247,15 @@ pub async fn run_gui_app(
                             }
                         }
                     });
+                }
+                GuiAction::TransferControl {
+                    target_addr,
+                    session_id,
+                    command,
+                } => {
+                    let _ = client
+                        .send_transfer_control(&target_addr, &session_id, command)
+                        .await;
                 }
             }
         }

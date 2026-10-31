@@ -132,6 +132,143 @@ pub fn resolve_destination_path(dir: &Path, filename: &str, expected_size: u64) 
     }
 }
 
+#[cfg(windows)]
+pub fn get_available_disk_space(dir: &Path) -> Result<u64> {
+    use std::os::windows::ffi::OsStrExt;
+    let mut path_wide: Vec<u16> = dir.as_os_str().encode_wide().collect();
+    path_wide.push(0);
+
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetDiskFreeSpaceExW(
+            lpDirectoryName: *const u16,
+            lpFreeBytesAvailableToCaller: *mut u64,
+            lpTotalNumberOfBytes: *mut u64,
+            lpTotalNumberOfFreeBytes: *mut u64,
+        ) -> i32;
+    }
+
+    let mut free_bytes_to_caller = 0u64;
+    let mut total_bytes = 0u64;
+    let mut total_free = 0u64;
+    let ret = unsafe {
+        GetDiskFreeSpaceExW(
+            path_wide.as_ptr(),
+            &mut free_bytes_to_caller,
+            &mut total_bytes,
+            &mut total_free,
+        )
+    };
+    if ret == 0 {
+        if let Some(parent) = dir.parent() {
+            let mut parent_wide: Vec<u16> = parent.as_os_str().encode_wide().collect();
+            parent_wide.push(0);
+            let ret2 = unsafe {
+                GetDiskFreeSpaceExW(
+                    parent_wide.as_ptr(),
+                    &mut free_bytes_to_caller,
+                    &mut total_bytes,
+                    &mut total_free,
+                )
+            };
+            if ret2 != 0 {
+                return Ok(free_bytes_to_caller);
+            }
+        }
+        bail!("Failed to query disk free space");
+    }
+    Ok(free_bytes_to_caller)
+}
+
+#[cfg(not(windows))]
+pub fn get_available_disk_space(_dir: &Path) -> Result<u64> {
+    Ok(u64::MAX)
+}
+
+pub fn check_free_space(dir: &Path, required_bytes: u64) -> Result<()> {
+    let available = get_available_disk_space(dir)?;
+    let safety_margin = 50 * 1024 * 1024u64; // 50 MB safety margin
+    if available < required_bytes.saturating_add(safety_margin) {
+        bail!(
+            "Insufficient free disk space (available: {} MB, required: {} MB)",
+            available / (1024 * 1024),
+            required_bytes / (1024 * 1024)
+        );
+    }
+    Ok(())
+}
+
+pub fn is_dangerous_executable(filename: &str) -> bool {
+    let ext = Path::new(filename)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    matches!(
+        ext.as_str(),
+        "exe"
+            | "bat"
+            | "cmd"
+            | "msi"
+            | "apk"
+            | "ps1"
+            | "sh"
+            | "vbs"
+            | "com"
+            | "scr"
+            | "reg"
+            | "jar"
+            | "pif"
+    )
+}
+
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+use tokio::sync::RwLock;
+
+#[derive(Clone, Default)]
+pub struct PairingRateLimiter {
+    attempts: Arc<RwLock<HashMap<IpAddr, (u32, Instant)>>>,
+}
+
+impl PairingRateLimiter {
+    pub async fn check_and_record_failure(&self, ip: IpAddr) -> Result<(), &'static str> {
+        let mut map = self.attempts.write().await;
+        let now = Instant::now();
+        if let Some((count, last_try)) = map.get_mut(&ip) {
+            if now.duration_since(*last_try) > Duration::from_secs(300) {
+                *count = 1;
+                *last_try = now;
+                Ok(())
+            } else if *count >= 5 {
+                Err("Too many failed pairing attempts. Locked for 5 minutes.")
+            } else {
+                *count += 1;
+                *last_try = now;
+                Ok(())
+            }
+        } else {
+            map.insert(ip, (1, now));
+            Ok(())
+        }
+    }
+
+    pub async fn is_locked(&self, ip: &IpAddr) -> bool {
+        let map = self.attempts.read().await;
+        if let Some((count, last_try)) = map.get(ip) {
+            *count >= 5 && last_try.elapsed() < Duration::from_secs(300)
+        } else {
+            false
+        }
+    }
+
+    pub async fn reset(&self, ip: &IpAddr) {
+        let mut map = self.attempts.write().await;
+        map.remove(ip);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -9,6 +9,23 @@ pub struct FileMetadata {
     pub filename: String,
     pub size_bytes: u64,
     pub blake3_hash: Option<String>,
+    #[serde(default)]
+    pub sha256_hash: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum TransferControlCommand {
+    Pause,
+    Resume,
+    Cancel,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TransferControlPayload {
+    pub session_id: String,
+    pub command: TransferControlCommand,
+    #[serde(default)]
+    pub reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -67,6 +84,8 @@ pub struct ActiveSession {
     pub total_bytes: u64,
     pub received_bytes: u64,
     pub created_at: Instant,
+    pub is_paused: bool,
+    pub is_cancelled: bool,
 }
 
 impl ActiveSession {

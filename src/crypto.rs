@@ -5,6 +5,105 @@ use std::fs;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 
+#[cfg(windows)]
+mod dpapi {
+    use anyhow::{Result, bail};
+
+    #[repr(C)]
+    struct DataBlob {
+        cb_data: u32,
+        pb_data: *mut u8,
+    }
+
+    #[link(name = "crypt32")]
+    unsafe extern "system" {
+        fn CryptProtectData(
+            p_data_in: *const DataBlob,
+            sz_data_descr: *const u16,
+            p_optional_entropy: *const DataBlob,
+            pv_reserved: *mut std::ffi::c_void,
+            p_prompt_struct: *mut std::ffi::c_void,
+            dw_flags: u32,
+            p_data_out: *mut DataBlob,
+        ) -> i32;
+
+        fn CryptUnprotectData(
+            p_data_in: *const DataBlob,
+            ppsz_data_descr: *mut *mut u16,
+            p_optional_entropy: *const DataBlob,
+            pv_reserved: *mut std::ffi::c_void,
+            p_prompt_struct: *mut std::ffi::c_void,
+            dw_flags: u32,
+            p_data_out: *mut DataBlob,
+        ) -> i32;
+    }
+
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn LocalFree(h_mem: *mut std::ffi::c_void) -> *mut std::ffi::c_void;
+    }
+
+    pub fn protect(data: &[u8]) -> Result<Vec<u8>> {
+        let in_blob = DataBlob {
+            cb_data: data.len() as u32,
+            pb_data: data.as_ptr() as *mut u8,
+        };
+        let mut out_blob = DataBlob {
+            cb_data: 0,
+            pb_data: std::ptr::null_mut(),
+        };
+        let res = unsafe {
+            CryptProtectData(
+                &in_blob,
+                std::ptr::null(),
+                std::ptr::null(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                0x01, // CRYPTPROTECT_UI_FORBIDDEN
+                &mut out_blob,
+            )
+        };
+        if res == 0 {
+            bail!("Windows DPAPI CryptProtectData failed");
+        }
+        let encrypted = unsafe {
+            std::slice::from_raw_parts(out_blob.pb_data, out_blob.cb_data as usize).to_vec()
+        };
+        unsafe { LocalFree(out_blob.pb_data as *mut std::ffi::c_void) };
+        Ok(encrypted)
+    }
+
+    pub fn unprotect(data: &[u8]) -> Result<Vec<u8>> {
+        let in_blob = DataBlob {
+            cb_data: data.len() as u32,
+            pb_data: data.as_ptr() as *mut u8,
+        };
+        let mut out_blob = DataBlob {
+            cb_data: 0,
+            pb_data: std::ptr::null_mut(),
+        };
+        let res = unsafe {
+            CryptUnprotectData(
+                &in_blob,
+                std::ptr::null_mut(),
+                std::ptr::null(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                0x01, // CRYPTPROTECT_UI_FORBIDDEN
+                &mut out_blob,
+            )
+        };
+        if res == 0 {
+            bail!("Windows DPAPI CryptUnprotectData failed");
+        }
+        let decrypted = unsafe {
+            std::slice::from_raw_parts(out_blob.pb_data, out_blob.cb_data as usize).to_vec()
+        };
+        unsafe { LocalFree(out_blob.pb_data as *mut std::ffi::c_void) };
+        Ok(decrypted)
+    }
+}
+
 pub fn init_crypto_provider() {
     let _ = rustls::crypto::ring::default_provider().install_default();
 }
@@ -23,20 +122,31 @@ impl TlsIdentity {
     }
 
     pub fn key_path(base_dir: &Path) -> PathBuf {
+        base_dir.join("key.dpapi")
+    }
+
+    pub fn legacy_key_path(base_dir: &Path) -> PathBuf {
         base_dir.join("key.pem")
     }
 
     pub fn load_or_generate(base_dir: &Path, device_name: &str) -> Result<Self> {
         let cert_file = Self::cert_path(base_dir);
         let key_file = Self::key_path(base_dir);
+        let legacy_key_file = Self::legacy_key_path(base_dir);
 
+        // 1. Try reading DPAPI encrypted key on Windows
         if cert_file.exists() && key_file.exists() {
             let cert_pem = fs::read_to_string(&cert_file)
                 .with_context(|| format!("Failed to read cert from {:?}", cert_file))?;
-            let key_pem = fs::read_to_string(&key_file)
-                .with_context(|| format!("Failed to read key from {:?}", key_file))?;
+            #[cfg(windows)]
+            let key_pem = {
+                let encrypted_bytes = fs::read(&key_file)?;
+                let raw_bytes = dpapi::unprotect(&encrypted_bytes)?;
+                String::from_utf8(raw_bytes).context("Decrypted private key is not valid UTF-8")?
+            };
+            #[cfg(not(windows))]
+            let key_pem = fs::read_to_string(&key_file)?;
 
-            // Parse DER from PEM
             if let Ok(der) = pem_to_der(&cert_pem) {
                 let fingerprint = compute_sha256_fingerprint(&der);
                 return Ok(Self {
@@ -48,10 +158,44 @@ impl TlsIdentity {
             }
         }
 
-        // Generate new self-signed certificate
+        // 2. Migration from legacy unencrypted key.pem to encrypted key.dpapi
+        if cert_file.exists() && legacy_key_file.exists() {
+            let cert_pem = fs::read_to_string(&cert_file)?;
+            let key_pem = fs::read_to_string(&legacy_key_file)?;
+
+            #[cfg(windows)]
+            {
+                if let Ok(encrypted) = dpapi::protect(key_pem.as_bytes()) {
+                    let _ = fs::write(&key_file, encrypted);
+                    let _ = fs::remove_file(&legacy_key_file);
+                }
+            }
+
+            if let Ok(der) = pem_to_der(&cert_pem) {
+                let fingerprint = compute_sha256_fingerprint(&der);
+                return Ok(Self {
+                    cert_pem,
+                    key_pem,
+                    cert_der: der,
+                    fingerprint,
+                });
+            }
+        }
+
+        // 3. Generate new self-signed certificate and store private key safely
         let identity = Self::generate_self_signed(device_name)?;
         fs::write(&cert_file, &identity.cert_pem)?;
-        fs::write(&key_file, &identity.key_pem)?;
+
+        #[cfg(windows)]
+        {
+            let encrypted = dpapi::protect(identity.key_pem.as_bytes())?;
+            fs::write(&key_file, encrypted)?;
+        }
+        #[cfg(not(windows))]
+        {
+            fs::write(&key_file, &identity.key_pem)?;
+        }
+
         Ok(identity)
     }
 
@@ -130,19 +274,38 @@ pub fn generate_session_token() -> String {
     hex::encode(token_bytes)
 }
 
-/// Computes a deterministic 4-digit pairing confirmation code between two peer fingerprints.
-/// Sorts the fingerprints so both sides calculate the exact same 4 digits.
+/// Computes a deterministic 6-digit pairing confirmation code between two peer fingerprints.
+/// Sorts the fingerprints so both sides calculate the exact same 6 digits.
 pub fn generate_pairing_code(fp1: &str, fp2: &str) -> String {
     let mut sorted = [fp1, fp2];
     sorted.sort();
     let mut hasher = blake3::Hasher::new();
     hasher.update(sorted[0].as_bytes());
-    hasher.update(b"|DropItPairing|");
+    hasher.update(b"|DropItPairingV2|");
     hasher.update(sorted[1].as_bytes());
     let hash = hasher.finalize();
     let bytes = hash.as_bytes();
-    let num = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) % 10000;
-    format!("{num:04}")
+    let num = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) % 1_000_000;
+    format!("{num:06}")
+}
+
+/// Compute SHA-256 hash of a file on disk by streaming in 1 MB chunks without buffering whole file in RAM
+pub async fn hash_file_sha256_streaming(path: &Path) -> Result<String> {
+    use tokio::io::AsyncReadExt;
+    let mut file = tokio::fs::File::open(path)
+        .await
+        .with_context(|| format!("Failed to open file for streaming SHA-256: {path:?}"))?;
+    let mut hasher = Sha256::new();
+    let mut buf = vec![0u8; 1024 * 1024]; // 1 MB buffer
+    loop {
+        let n = file.read(&mut buf).await?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    let res = hasher.finalize();
+    Ok(hex::encode(res))
 }
 
 /// Generates an ASCII/Unicode QR code suitable for printing directly into terminal stdout
@@ -220,7 +383,7 @@ mod tests {
         let code1 = generate_pairing_code(fp_a, fp_b);
         let code2 = generate_pairing_code(fp_b, fp_a);
         assert_eq!(code1, code2);
-        assert_eq!(code1.len(), 4);
+        assert_eq!(code1.len(), 6);
         assert!(code1.chars().all(|c| c.is_ascii_digit()));
     }
 }

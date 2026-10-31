@@ -73,6 +73,7 @@ async fn test_send_2gb_large_file_streaming() {
         filename: "large_2gb.bin".to_string(),
         size_bytes: two_gb_bytes,
         blake3_hash: Some(expected_hash.clone()),
+        sha256_hash: None,
     };
 
     let offer_req = TransferOfferRequest {
@@ -180,6 +181,7 @@ async fn test_send_1000_small_files_batch() {
             filename,
             size_bytes: content.len() as u64,
             blake3_hash: None,
+            sha256_hash: None,
         };
         metas.push(meta.clone());
         items.push((meta, path));

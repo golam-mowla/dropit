@@ -67,6 +67,7 @@ async fn test_path_traversal_and_malicious_filenames() {
             filename: filename.to_string(),
             size_bytes: 12,
             blake3_hash: None,
+            sha256_hash: None,
         });
     }
 
@@ -181,6 +182,7 @@ async fn test_pinned_fingerprint_mismatch_rejection() {
             filename: "exploit.txt".to_string(),
             size_bytes: 10,
             blake3_hash: None,
+            sha256_hash: None,
         }],
     };
 
@@ -250,6 +252,7 @@ async fn test_rate_limiting_rapid_offers() {
             filename: "spam.txt".to_string(),
             size_bytes: 4,
             blake3_hash: None,
+            sha256_hash: None,
         }],
     };
 
@@ -329,6 +332,7 @@ async fn test_max_concurrent_sessions_limit() {
                 filename: format!("file_{i}.dat"),
                 size_bytes: 10,
                 blake3_hash: None,
+                sha256_hash: None,
             }],
         };
         let res = client.send_offer(&host_port, &offer).await;
@@ -349,6 +353,7 @@ async fn test_max_concurrent_sessions_limit() {
             filename: "overflow.dat".to_string(),
             size_bytes: 10,
             blake3_hash: None,
+            sha256_hash: None,
         }],
     };
 
@@ -418,6 +423,7 @@ async fn test_unauthorized_token_rejection() {
             filename: "secret.txt".to_string(),
             size_bytes: 10,
             blake3_hash: None,
+            sha256_hash: None,
         }],
     };
 

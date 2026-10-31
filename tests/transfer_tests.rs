@@ -73,6 +73,7 @@ async fn test_secure_file_streaming_roundtrip() {
         filename: "test_payload.bin".to_string(),
         size_bytes: test_payload.len() as u64,
         blake3_hash: Some(expected_hash.clone()),
+        sha256_hash: None,
     };
 
     let offer_req = TransferOfferRequest {
@@ -188,6 +189,7 @@ async fn test_resume_interrupted_transfer() {
         filename: "resumable.bin".to_string(),
         size_bytes: total_size as u64,
         blake3_hash: Some(expected_hash.clone()),
+        sha256_hash: None,
     };
 
     let offer_req = TransferOfferRequest {
@@ -301,6 +303,7 @@ async fn test_parallel_small_file_streams() {
             filename,
             size_bytes: content.len() as u64,
             blake3_hash: Some(hash),
+            sha256_hash: None,
         };
         metas.push(meta.clone());
         file_items.push((meta, path));
@@ -412,6 +415,7 @@ async fn test_verify_hash_toggle() {
         filename: "no_verify.bin".to_string(),
         size_bytes: payload.len() as u64,
         blake3_hash: None,
+        sha256_hash: None,
     };
 
     let offer_req = TransferOfferRequest {
