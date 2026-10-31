@@ -289,29 +289,53 @@ fn paint_dashed_rect(painter: &egui::Painter, rect: egui::Rect, radius: f32, str
     let dash_len = 6.0;
     let gap_len = 4.0;
     let seg = dash_len + gap_len;
-    
+
     // Top
     let mut x = rect.left() + radius;
     while x + dash_len <= rect.right() - radius {
-        painter.line_segment([egui::pos2(x, rect.top()), egui::pos2(x + dash_len, rect.top())], stroke);
+        painter.line_segment(
+            [
+                egui::pos2(x, rect.top()),
+                egui::pos2(x + dash_len, rect.top()),
+            ],
+            stroke,
+        );
         x += seg;
     }
     // Bottom
     let mut x = rect.left() + radius;
     while x + dash_len <= rect.right() - radius {
-        painter.line_segment([egui::pos2(x, rect.bottom()), egui::pos2(x + dash_len, rect.bottom())], stroke);
+        painter.line_segment(
+            [
+                egui::pos2(x, rect.bottom()),
+                egui::pos2(x + dash_len, rect.bottom()),
+            ],
+            stroke,
+        );
         x += seg;
     }
     // Left
     let mut y = rect.top() + radius;
     while y + dash_len <= rect.bottom() - radius {
-        painter.line_segment([egui::pos2(rect.left(), y), egui::pos2(rect.left(), y + dash_len)], stroke);
+        painter.line_segment(
+            [
+                egui::pos2(rect.left(), y),
+                egui::pos2(rect.left(), y + dash_len),
+            ],
+            stroke,
+        );
         y += seg;
     }
     // Right
     let mut y = rect.top() + radius;
     while y + dash_len <= rect.bottom() - radius {
-        painter.line_segment([egui::pos2(rect.right(), y), egui::pos2(rect.right(), y + dash_len)], stroke);
+        painter.line_segment(
+            [
+                egui::pos2(rect.right(), y),
+                egui::pos2(rect.right(), y + dash_len),
+            ],
+            stroke,
+        );
         y += seg;
     }
 }
@@ -328,7 +352,11 @@ impl DropItApp {
         // Configure custom fonts / modern styling from dropit_redesign_preview.html
         let is_dark = config.dark_theme;
         let theme = AppTheme::new(is_dark);
-        let mut visuals = if is_dark { egui::Visuals::dark() } else { egui::Visuals::light() };
+        let mut visuals = if is_dark {
+            egui::Visuals::dark()
+        } else {
+            egui::Visuals::light()
+        };
         visuals.override_text_color = Some(theme.text_primary);
         visuals.panel_fill = theme.surface_2;
         visuals.window_fill = theme.page_bg;
@@ -937,8 +965,14 @@ impl eframe::App for DropItApp {
                                         if let Some(err) = error.clone() {
                                             if err.to_ascii_lowercase().contains("decline") {
                                                 *status = FileTransferStatus::Declined;
-                                            } else if err.to_ascii_lowercase().contains("connection") || err.to_ascii_lowercase().contains("reset") {
-                                                *status = FileTransferStatus::Paused("paused (connection lost)".into());
+                                            } else if err
+                                                .to_ascii_lowercase()
+                                                .contains("connection")
+                                                || err.to_ascii_lowercase().contains("reset")
+                                            {
+                                                *status = FileTransferStatus::Paused(
+                                                    "paused (connection lost)".into(),
+                                                );
                                             } else {
                                                 *status = FileTransferStatus::Failed(err.clone());
                                                 self.transfer_history.push(HistoryRecord {
@@ -995,7 +1029,11 @@ impl eframe::App for DropItApp {
         egui::SidePanel::left("icon_rail")
             .resizable(false)
             .exact_width(56.0)
-            .frame(egui::Frame::NONE.fill(theme.rail_bg).stroke(egui::Stroke::new(0.5_f32, theme.border)))
+            .frame(
+                egui::Frame::NONE
+                    .fill(theme.rail_bg)
+                    .stroke(egui::Stroke::new(0.5_f32, theme.border)),
+            )
             .show(ctx, |ui| {
                 self.render_icon_rail(ui, theme);
             });
@@ -1004,7 +1042,11 @@ impl eframe::App for DropItApp {
         egui::SidePanel::left("sidebar_panel")
             .resizable(false)
             .exact_width(195.0)
-            .frame(egui::Frame::NONE.fill(theme.surface_1).stroke(egui::Stroke::new(0.5_f32, theme.border)))
+            .frame(
+                egui::Frame::NONE
+                    .fill(theme.surface_1)
+                    .stroke(egui::Stroke::new(0.5_f32, theme.border)),
+            )
             .show(ctx, |ui| {
                 self.render_sidebar(ui, theme);
             });
@@ -1048,7 +1090,7 @@ impl DropItApp {
             let is_selected = self.active_rail_tab == tab;
             let (btn_rect, response) =
                 ui.allocate_exact_size(egui::vec2(34.0, 34.0), egui::Sense::click());
-            
+
             let bg_color = if is_selected {
                 theme.bg_accent
             } else if response.hovered() {
@@ -1057,7 +1099,7 @@ impl DropItApp {
                 egui::Color32::TRANSPARENT
             };
             ui.painter().rect_filled(btn_rect, 10.0, bg_color);
-            
+
             let text_color = if is_selected {
                 theme.text_accent
             } else {
@@ -1110,7 +1152,14 @@ impl DropItApp {
 
             ui.add_space(10.0);
             if ui
-                .add(egui::Button::new(egui::RichText::new("📱").size(15.0).color(theme.text_secondary)).frame(false))
+                .add(
+                    egui::Button::new(
+                        egui::RichText::new("📱")
+                            .size(15.0)
+                            .color(theme.text_secondary),
+                    )
+                    .frame(false),
+                )
                 .on_hover_text("Mobile Web UI (QR Code)")
                 .clicked()
             {
@@ -1118,14 +1167,25 @@ impl DropItApp {
             }
 
             ui.add_space(10.0);
-            let theme_icon = if self.config.dark_theme { "☀️" } else { "🌙" };
+            let theme_icon = if self.config.dark_theme {
+                "☀️"
+            } else {
+                "🌙"
+            };
             let theme_label = if self.config.dark_theme {
                 "Switch to Light Theme"
             } else {
                 "Switch to Dark Theme"
             };
             if ui
-                .add(egui::Button::new(egui::RichText::new(theme_icon).size(15.0).color(theme.text_secondary)).frame(false))
+                .add(
+                    egui::Button::new(
+                        egui::RichText::new(theme_icon)
+                            .size(15.0)
+                            .color(theme.text_secondary),
+                    )
+                    .frame(false),
+                )
                 .on_hover_text(theme_label)
                 .clicked()
             {
@@ -1153,7 +1213,8 @@ impl DropItApp {
         ui.horizontal(|ui| {
             ui.add_space(12.0);
             let (rect, _) = ui.allocate_exact_size(egui::vec2(28.0, 28.0), egui::Sense::hover());
-            ui.painter().circle_filled(rect.center(), 14.0, theme.bg_pro);
+            ui.painter()
+                .circle_filled(rect.center(), 14.0, theme.bg_pro);
 
             let initials = if self.config.device_name.len() >= 2 {
                 self.config.device_name[..2].to_uppercase()
@@ -1294,13 +1355,25 @@ impl DropItApp {
         });
     }
 
-    fn render_peer_item(&mut self, ui: &mut egui::Ui, peer: &GuiPeer, theme: AppTheme, is_fav_section: bool) {
+    fn render_peer_item(
+        &mut self,
+        ui: &mut egui::Ui,
+        peer: &GuiPeer,
+        theme: AppTheme,
+        is_fav_section: bool,
+    ) {
         let is_selected = self.selected_peer_id.as_deref() == Some(&peer.id);
         let is_fav = self.config.is_favorite(&peer.id);
-        let display_name = self.config.get_display_name(&peer.id, &peer.name).to_string();
+        let display_name = self
+            .config
+            .get_display_name(&peer.id, &peer.name)
+            .to_string();
 
         let (bg_color, stroke) = if is_selected {
-            (theme.bg_accent_muted, egui::Stroke::new(0.5_f32, theme.border_accent))
+            (
+                theme.bg_accent_muted,
+                egui::Stroke::new(0.5_f32, theme.border_accent),
+            )
         } else {
             (egui::Color32::TRANSPARENT, egui::Stroke::NONE)
         };
@@ -1319,7 +1392,8 @@ impl DropItApp {
 
                 ui.horizontal(|ui| {
                     // 30x30 avatar circle
-                    let (rect, _) = ui.allocate_exact_size(egui::vec2(30.0, 30.0), egui::Sense::hover());
+                    let (rect, _) =
+                        ui.allocate_exact_size(egui::vec2(30.0, 30.0), egui::Sense::hover());
                     let (avatar_bg, avatar_fg) = if is_fav_section || is_fav {
                         (theme.bg_warning, theme.text_warning)
                     } else {
@@ -1373,8 +1447,17 @@ impl DropItApp {
                             theme.text_muted
                         };
                         if ui
-                            .add(egui::Button::new(egui::RichText::new(star_icon).size(13.0).color(star_color)).frame(false))
-                            .on_hover_text(if is_fav { "Remove favorite" } else { "Add favorite" })
+                            .add(
+                                egui::Button::new(
+                                    egui::RichText::new(star_icon).size(13.0).color(star_color),
+                                )
+                                .frame(false),
+                            )
+                            .on_hover_text(if is_fav {
+                                "Remove favorite"
+                            } else {
+                                "Add favorite"
+                            })
                             .clicked()
                         {
                             let _ = self.config.toggle_favorite(&peer.id);
@@ -1384,7 +1467,11 @@ impl DropItApp {
             });
 
             if ui
-                .interact(frame_res.response.rect, ui.id().with(&peer.id), egui::Sense::click())
+                .interact(
+                    frame_res.response.rect,
+                    ui.id().with(&peer.id),
+                    egui::Sense::click(),
+                )
                 .clicked()
             {
                 self.selected_peer_id = Some(peer.id.clone());
@@ -1403,11 +1490,26 @@ impl DropItApp {
                     ui.add_space(20.0);
                     ui.vertical_centered(|ui| {
                         ui.add_space(40.0);
-                        ui.label(egui::RichText::new("☁").size(36.0).color(theme.text_secondary));
+                        ui.label(
+                            egui::RichText::new("☁")
+                                .size(36.0)
+                                .color(theme.text_secondary),
+                        );
                         ui.add_space(8.0);
-                        ui.label(egui::RichText::new("Drop It Local Transfer").size(18.0).strong().color(theme.text_primary));
+                        ui.label(
+                            egui::RichText::new("Drop It Local Transfer")
+                                .size(18.0)
+                                .strong()
+                                .color(theme.text_primary),
+                        );
                         ui.add_space(4.0);
-                        ui.label(egui::RichText::new("Select a device from the sidebar to start sharing").size(13.0).color(theme.text_muted));
+                        ui.label(
+                            egui::RichText::new(
+                                "Select a device from the sidebar to start sharing",
+                            )
+                            .size(13.0)
+                            .color(theme.text_muted),
+                        );
                     });
                     return;
                 }
@@ -1419,7 +1521,10 @@ impl DropItApp {
             None => return,
         };
 
-        let display_name = self.config.get_display_name(&peer.id, &peer.name).to_string();
+        let display_name = self
+            .config
+            .get_display_name(&peer.id, &peer.name)
+            .to_string();
 
         ui.add_space(14.0);
 
@@ -1511,7 +1616,12 @@ impl DropItApp {
             } else {
                 theme.border_strong
             };
-            paint_dashed_rect(ui.painter(), drop_rect, 12.0, egui::Stroke::new(1.5_f32, stroke_color));
+            paint_dashed_rect(
+                ui.painter(),
+                drop_rect,
+                12.0,
+                egui::Stroke::new(1.5_f32, stroke_color),
+            );
 
             let c = drop_rect.center();
             ui.painter().text(
@@ -1612,9 +1722,7 @@ impl DropItApp {
                     if let Some(msgs) = self.chat_history.get_mut(&selected_id) {
                         for m in msgs.iter_mut() {
                             if let ChatMessageKind::FileCard {
-                                session_id,
-                                status,
-                                ..
+                                session_id, status, ..
                             } = &mut m.kind
                             {
                                 if session_id == &sess_id {
@@ -1695,9 +1803,7 @@ impl DropItApp {
                 if ui
                     .add(
                         egui::Button::new(
-                            egui::RichText::new("➤")
-                                .size(14.0)
-                                .color(theme.on_accent),
+                            egui::RichText::new("➤").size(14.0).color(theme.on_accent),
                         )
                         .fill(theme.fill_accent)
                         .corner_radius(8.0)
@@ -1723,15 +1829,31 @@ impl DropItApp {
 
         match &msg.kind {
             ChatMessageKind::Text(text) => {
-                let align = if is_me { egui::Align::Max } else { egui::Align::Min };
+                let align = if is_me {
+                    egui::Align::Max
+                } else {
+                    egui::Align::Min
+                };
                 ui.with_layout(egui::Layout::top_down(align), |ui| {
                     ui.horizontal(|ui| {
                         if !is_me {
                             ui.add_space(16.0);
                         }
-                        let bg = if is_me { theme.fill_accent } else { theme.surface_1 };
-                        let fg = if is_me { theme.on_accent } else { theme.text_primary };
-                        let stroke = if is_me { egui::Stroke::NONE } else { egui::Stroke::new(0.5_f32, theme.border) };
+                        let bg = if is_me {
+                            theme.fill_accent
+                        } else {
+                            theme.surface_1
+                        };
+                        let fg = if is_me {
+                            theme.on_accent
+                        } else {
+                            theme.text_primary
+                        };
+                        let stroke = if is_me {
+                            egui::Stroke::NONE
+                        } else {
+                            egui::Stroke::new(0.5_f32, theme.border)
+                        };
                         egui::Frame::NONE
                             .fill(bg)
                             .stroke(stroke)
@@ -1763,7 +1885,13 @@ impl DropItApp {
                     .map(|f| f.filename.clone())
                     .unwrap_or_else(|| "File".into());
 
-                let file_icon = match first_name.rsplit('.').next().unwrap_or("").to_lowercase().as_str() {
+                let file_icon = match first_name
+                    .rsplit('.')
+                    .next()
+                    .unwrap_or("")
+                    .to_lowercase()
+                    .as_str()
+                {
                     "mp4" | "mkv" | "mov" | "avi" | "webm" => "🎬",
                     "png" | "jpg" | "jpeg" | "gif" | "webp" => "🖼",
                     "pdf" | "doc" | "docx" | "txt" => "📄",
@@ -2090,15 +2218,13 @@ impl DropItApp {
                 ui.add_space(16.0);
                 if ui
                     .add(
-                        egui::Button::new(
-                            egui::RichText::new("Clear history").size(12.0),
-                        )
-                        .corner_radius(6.0)
-                        .fill(if is_dark {
-                            egui::Color32::from_rgb(37, 45, 64)
-                        } else {
-                            egui::Color32::from_rgb(229, 231, 235)
-                        }),
+                        egui::Button::new(egui::RichText::new("Clear history").size(12.0))
+                            .corner_radius(6.0)
+                            .fill(if is_dark {
+                                egui::Color32::from_rgb(37, 45, 64)
+                            } else {
+                                egui::Color32::from_rgb(229, 231, 235)
+                            }),
                     )
                     .clicked()
                 {
@@ -2275,12 +2401,12 @@ impl DropItApp {
                                     ui.with_layout(
                                         egui::Layout::right_to_left(egui::Align::Center),
                                         |ui| {
-                                            let mut auto_acc = self
-                                                .config
-                                                .is_auto_accept_for_favorite(&peer.id);
+                                            let mut auto_acc =
+                                                self.config.is_auto_accept_for_favorite(&peer.id);
                                             if ui.checkbox(&mut auto_acc, "Auto-accept").changed() {
-                                                self.config
-                                                    .set_auto_accept_for_favorite(&peer.id, auto_acc);
+                                                self.config.set_auto_accept_for_favorite(
+                                                    &peer.id, auto_acc,
+                                                );
                                                 let _ = self.config.save();
                                             }
                                             if ui.button("Send files").clicked() {
@@ -2322,7 +2448,12 @@ impl DropItApp {
         ui.add_space(12.0);
         ui.separator();
 
-        let online: Vec<GuiPeer> = self.peers.values().filter(|p| p.is_online).cloned().collect();
+        let online: Vec<GuiPeer> = self
+            .peers
+            .values()
+            .filter(|p| p.is_online)
+            .cloned()
+            .collect();
         if online.is_empty() {
             ui.vertical_centered(|ui| {
                 ui.add_space(60.0);

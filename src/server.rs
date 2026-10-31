@@ -373,15 +373,22 @@ async fn handle_get_events(
                 }
                 WebSseEvent::TransferPaused { session_id } => {
                     let json = serde_json::json!({ "session_id": session_id, "status": "paused" });
-                    Event::default().event("transfer_paused").data(json.to_string())
+                    Event::default()
+                        .event("transfer_paused")
+                        .data(json.to_string())
                 }
                 WebSseEvent::TransferResumed { session_id } => {
                     let json = serde_json::json!({ "session_id": session_id, "status": "resumed" });
-                    Event::default().event("transfer_resumed").data(json.to_string())
+                    Event::default()
+                        .event("transfer_resumed")
+                        .data(json.to_string())
                 }
                 WebSseEvent::TransferCancelled { session_id } => {
-                    let json = serde_json::json!({ "session_id": session_id, "status": "cancelled" });
-                    Event::default().event("transfer_cancelled").data(json.to_string())
+                    let json =
+                        serde_json::json!({ "session_id": session_id, "status": "cancelled" });
+                    Event::default()
+                        .event("transfer_cancelled")
+                        .data(json.to_string())
                 }
             };
             if tx_clone.send(Ok(event)).await.is_err() {
@@ -815,7 +822,10 @@ async fn handle_post_offer(
     };
 
     if !accepted {
-        let _ = state.rate_limiter.check_and_record_failure(peer_addr.ip()).await;
+        let _ = state
+            .rate_limiter
+            .check_and_record_failure(peer_addr.ip())
+            .await;
         return Ok(Json(TransferOfferResponse {
             accepted: false,
             session_token: None,
@@ -989,7 +999,14 @@ async fn handle_put_upload(
         })?;
 
     // 3. Session lookup & verification
-    let (dest_path, expected_hash, expected_sha256, sender_device_id, sender_fingerprint, session_total_bytes) = {
+    let (
+        dest_path,
+        expected_hash,
+        expected_sha256,
+        sender_device_id,
+        sender_fingerprint,
+        session_total_bytes,
+    ) = {
         let sessions = state.active_sessions.read().await;
         let session = sessions.get(&session_id).ok_or_else(|| {
             (

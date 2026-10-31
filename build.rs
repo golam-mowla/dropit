@@ -15,7 +15,10 @@ fn main() {
         let libunwind_path = assets_dir.join("libunwind.a");
         if libunwind_path.exists() {
             println!("cargo:rustc-link-search=native={}", assets_dir.display());
-            println!("cargo:rustc-link-arg-bin=dropit={}", libunwind_path.display());
+            println!(
+                "cargo:rustc-link-arg-bin=dropit={}",
+                libunwind_path.display()
+            );
             println!("cargo:rustc-link-arg-bin=dropit=-Wl,-Bstatic");
             println!("cargo:rustc-link-arg-bin=dropit=-lunwind");
             println!("cargo:rustc-link-arg-bin=dropit=-Wl,-Bdynamic");

@@ -197,7 +197,8 @@ impl DropItConfig {
     }
 
     pub fn set_auto_accept_for_favorite(&mut self, peer_id: &str, enabled: bool) {
-        self.auto_accept_favorites.insert(peer_id.to_string(), enabled);
+        self.auto_accept_favorites
+            .insert(peer_id.to_string(), enabled);
     }
 
     pub fn set_nickname(&mut self, id: &str, nickname: &str) -> Result<()> {
