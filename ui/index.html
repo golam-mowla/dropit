@@ -4,476 +4,675 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Drop It - Local File Transfer</title>
-  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 36 36'%3E%3Ccircle cx='18' cy='18' r='18' fill='%236366F1'/%3E%3Cpath d='M18 8v13' stroke='white' stroke-width='2.5' stroke-linecap='round'/%3E%3Cpolyline points='13 16 18 21 23 16' stroke='white' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3Cpath d='M10 23a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-2' stroke='white' stroke-width='2.5' stroke-linecap='round' fill='none'/%3E%3C/svg%3E">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 36 36'%3E%3Ccircle cx='18' cy='18' r='18' fill='%232563EB'/%3E%3Cpath d='M18 8v13' stroke='white' stroke-width='2.5' stroke-linecap='round'/%3E%3Cpolyline points='13 16 18 21 23 16' stroke='white' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3Cpath d='M10 23a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-2' stroke='white' stroke-width='2.5' stroke-linecap='round' fill='none'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.42.0/dist/tabler-icons.min.css">
   <style>
     :root {
-      --bg: #09090b;
-      --surface: #121215;
-      --card: #18181b;
-      --border: #27272a;
-      --accent: #6366f1;
-      --accent-hover: #4f46e5;
-      --accent-subtle: rgba(99, 102, 241, 0.12);
-      --text: #f4f4f5;
-      --muted: #a1a1aa;
-      --success: #10b981;
-      --danger: #ef4444;
-      --shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.4);
+      --surface-1: #fcfcfb;
+      --surface-2: #ffffff;
+      --surface-3: #f0efec;
+      --border: rgba(0, 0, 0, 0.1);
+      --border-strong: rgba(0, 0, 0, 0.22);
+      --border-accent: #86b6ef;
+      --fill-accent: #2563eb;
+      --on-accent: #ffffff;
+      --bg-accent: #ebf4fc;
+      --bg-accent-muted: rgba(42, 120, 214, 0.08);
+      --text-primary: #0b0b0b;
+      --text-secondary: #52514e;
+      --text-muted: #898781;
+      --text-accent: #1c5cab;
+      --text-success: #1e9e3c;
+      --bg-warning: #f9eedb;
+      --text-warning: #b77700;
+      --bg-pro: #efedff;
+      --text-pro: #6250d6;
+      --radius: 8px;
+      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
     }
-    @media (prefers-color-scheme: light) {
-      :root:not([data-theme="dark"]) {
-        --bg: #f8fafc;
-        --surface: #ffffff;
-        --card: #ffffff;
-        --border: #e2e8f0;
-        --accent: #6366f1;
-        --accent-hover: #4f46e5;
-        --accent-subtle: rgba(99, 102, 241, 0.08);
-        --text: #0f172a;
-        --muted: #64748b;
-        --success: #10b981;
-        --danger: #ef4444;
-        --shadow: 0 4px 16px -2px rgba(15, 23, 42, 0.06);
+    :root[data-theme="dark"], @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --surface-1: #151515;
+        --surface-2: #1c1c1b;
+        --surface-3: #20201f;
+        --border: rgba(255, 255, 255, 0.1);
+        --border-strong: rgba(255, 255, 255, 0.22);
+        --border-accent: #0d366b;
+        --fill-accent: #2563eb;
+        --on-accent: #ffffff;
+        --bg-accent: #062b57;
+        --bg-accent-muted: rgba(42, 120, 214, 0.18);
+        --text-primary: #f0efec;
+        --text-secondary: #c3c2b7;
+        --text-muted: #7b7974;
+        --text-accent: #6da7ec;
+        --text-success: #32d74b;
+        --bg-warning: #311a00;
+        --text-warning: #fab219;
+        --bg-pro: #1d1649;
+        --text-pro: #bfb9f5;
+        --radius: 8px;
       }
     }
     :root[data-theme="light"] {
-      --bg: #f8fafc;
-      --surface: #ffffff;
-      --card: #ffffff;
-      --border: #e2e8f0;
-      --accent: #6366f1;
-      --accent-hover: #4f46e5;
-      --accent-subtle: rgba(99, 102, 241, 0.08);
-      --text: #0f172a;
-      --muted: #64748b;
-      --success: #10b981;
-      --danger: #ef4444;
-      --shadow: 0 4px 16px -2px rgba(15, 23, 42, 0.06);
+      --surface-1: #fcfcfb;
+      --surface-2: #ffffff;
+      --surface-3: #f0efec;
+      --border: rgba(0, 0, 0, 0.1);
+      --border-strong: rgba(0, 0, 0, 0.22);
+      --border-accent: #86b6ef;
+      --fill-accent: #2563eb;
+      --on-accent: #ffffff;
+      --bg-accent: #ebf4fc;
+      --bg-accent-muted: rgba(42, 120, 214, 0.08);
+      --text-primary: #0b0b0b;
+      --text-secondary: #52514e;
+      --text-muted: #898781;
+      --text-accent: #1c5cab;
+      --text-success: #1e9e3c;
+      --bg-warning: #f9eedb;
+      --text-warning: #b77700;
+      --bg-pro: #efedff;
+      --text-pro: #6250d6;
     }
-    :root[data-theme="dark"] {
-      --bg: #09090b;
-      --surface: #121215;
-      --card: #18181b;
-      --border: #27272a;
-      --accent: #6366f1;
-      --accent-hover: #4f46e5;
-      --accent-subtle: rgba(99, 102, 241, 0.12);
-      --text: #f4f4f5;
-      --muted: #a1a1aa;
-      --success: #10b981;
-      --danger: #ef4444;
-      --shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.4);
-    }
+
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-      background: var(--bg);
-      color: var(--text);
+      font-family: var(--font-sans);
+      background: var(--surface-1);
+      color: var(--text-primary);
+      min-height: 100vh;
       display: flex;
       justify-content: center;
-      min-height: 100vh;
+      align-items: center;
       padding: 16px;
-      transition: background-color 150ms ease, color 150ms ease;
     }
-    @media (prefers-reduced-motion: reduce) {
-      *, *::before, *::after { transition: none !important; animation: none !important; }
-    }
-    .app {
+
+    #app-container {
       width: 100%;
-      max-width: 720px;
+      max-width: 960px;
+      height: 640px;
+      background: var(--surface-1);
+      border-radius: 12px;
       display: flex;
       flex-direction: column;
-      gap: 24px;
     }
-    header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 8px 0;
-    }
-    .brand {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-    .logo {
-      width: 38px;
-      height: 38px;
-      border-radius: 50%;
-      background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
-      color: #ffffff;
+
+    .app-frame {
       display: grid;
-      place-items: center;
-      box-shadow: 0 2px 10px rgba(99, 102, 241, 0.35);
+      grid-template-columns: 56px 190px minmax(0, 1fr);
+      border: 0.5px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+      background: var(--surface-2);
+      height: 100%;
     }
-    .title-group h1 {
-      font-size: 1.25rem;
-      font-weight: 700;
-      letter-spacing: -0.02em;
+
+    /* Column 1: Narrow Icon Rail (56px) */
+    .icon-rail {
+      border-right: 0.5px solid var(--border);
+      padding: 12px 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 14px;
+      font-size: 20px;
+      color: var(--text-secondary);
+      background: var(--surface-1);
+      user-select: none;
     }
-    .device-pill {
-      font-size: 0.8rem;
-      color: var(--muted);
+    .rail-btn {
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
       display: flex;
       align-items: center;
-      gap: 6px;
+      justify-content: center;
+      cursor: pointer;
+      color: var(--text-secondary);
+      transition: all 120ms ease;
+      background: transparent;
+      border: none;
     }
-    .pulse-dot {
-      width: 8px;
-      height: 8px;
+    .rail-btn:hover {
+      color: var(--text-primary);
+      background: var(--surface-3);
+    }
+    .rail-btn.active {
+      background: var(--bg-accent);
+      color: var(--text-accent);
+    }
+    .rail-spacer { flex: 1; }
+
+    /* Column 2: Device Sidebar (190px) */
+    .sidebar {
+      border-right: 0.5px solid var(--border);
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      background: var(--surface-1);
+      overflow-y: auto;
+    }
+    .section-label {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin: 12px 0 6px;
+      font-weight: 500;
+    }
+    .this-device-box {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .avatar-di {
+      width: 28px;
+      height: 28px;
       border-radius: 50%;
-      background: var(--success);
+      background: var(--bg-pro);
+      color: var(--text-pro);
+      font-size: 11px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .device-name-text {
+      font-size: 13.5px;
+      font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .search-input {
+      width: 100%;
+      padding: 6px 10px;
+      border-radius: 6px;
+      border: 0.5px solid var(--border);
+      background: var(--surface-2);
+      color: var(--text-primary);
+      font-size: 12.5px;
+      outline: none;
+      margin-bottom: 8px;
+    }
+    .search-input:focus {
+      border-color: var(--border-accent);
+    }
+
+    .peer-card {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px;
+      border-radius: var(--radius);
+      cursor: pointer;
+      transition: background 120ms ease;
+      margin-bottom: 4px;
+      border: 0.5px solid transparent;
+      user-select: none;
+    }
+    .peer-card:hover {
+      background: var(--surface-3);
+    }
+    .peer-card.selected {
+      background: var(--bg-accent-muted);
+      border-color: var(--border-accent);
+    }
+    .peer-avatar {
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+      font-size: 12px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .peer-card.fav .peer-avatar {
+      background: var(--bg-warning);
+      color: var(--text-warning);
+    }
+    .peer-card.nearby .peer-avatar {
+      background: var(--surface-2);
+      color: var(--text-secondary);
+      border: 0.5px solid var(--border);
+    }
+    .peer-info {
+      min-width: 0;
+      flex: 1;
+    }
+    .peer-name {
+      margin: 0;
+      font-size: 13.5px;
+      font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .peer-status {
+      margin: 0;
+      font-size: 11.5px;
+    }
+    .status-online { color: var(--text-success); }
+    .status-pair { color: var(--text-muted); }
+
+    /* Column 3: Main Transfer Panel */
+    .main-panel {
+      padding: 14px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      min-width: 0;
+      background: var(--surface-2);
+      height: 100%;
+      overflow: hidden;
+    }
+
+    .main-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding-bottom: 2px;
+    }
+    .header-device-name {
+      font-size: 16px;
+      font-weight: 600;
+      margin: 0;
+    }
+    .header-security-badge {
+      font-size: 12px;
+      color: var(--text-secondary);
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      margin-top: 2px;
     }
     .header-actions {
       display: flex;
-      align-items: center;
-      gap: 8px;
+      gap: 6px;
     }
-    button {
+    button.btn {
       font-family: inherit;
+      font-size: 13px;
+      padding: 6px 12px;
+      border-radius: 8px;
       cursor: pointer;
-      border: none;
-      outline: none;
-      background: none;
-      border-radius: 12px;
-      min-height: 44px;
-      min-width: 44px;
       display: inline-flex;
       align-items: center;
-      justify-content: center;
-      transition: all 150ms ease;
+      gap: 6px;
+      border: 0.5px solid var(--border-strong);
+      background: transparent;
+      color: var(--text-primary);
+      transition: all 120ms ease;
     }
-    button:focus-visible {
-      outline: 2px solid var(--accent);
-      outline-offset: 2px;
+    button.btn:hover {
+      background: var(--surface-1);
     }
-    .icon-btn {
-      color: var(--muted);
-      border: 1px solid var(--border);
-      background: var(--card);
+    button.btn-primary {
+      background: var(--fill-accent);
+      color: var(--on-accent);
+      border-color: transparent;
+      font-weight: 500;
     }
-    .icon-btn:hover {
-      color: var(--text);
-      border-color: var(--accent);
+    button.btn-primary:hover {
+      background: #1d4ed8;
     }
+
+    /* Dashed Drop Zone */
     .dropzone {
-      border: 2px dashed var(--border);
-      border-radius: 16px;
-      background: var(--surface);
-      padding: 40px 24px;
+      border: 1.5px dashed var(--border-strong);
+      border-radius: 12px;
+      padding: 22px;
       text-align: center;
       cursor: pointer;
+      background: var(--surface-1);
       transition: all 150ms ease;
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: 12px;
-      box-shadow: var(--shadow);
+      justify-content: center;
     }
     .dropzone:hover, .dropzone.dragover {
-      border-color: var(--accent);
-      background: var(--accent-subtle);
+      border-color: var(--fill-accent);
+      background: var(--bg-accent-muted);
     }
-    .drop-icon {
-      width: 48px;
-      height: 48px;
-      color: var(--accent);
+    .dropzone i {
+      font-size: 28px;
+      color: var(--text-secondary);
+      margin-bottom: 6px;
     }
-    .drop-text {
-      font-size: 1.05rem;
-      font-weight: 600;
+    .dropzone-title {
+      font-size: 15px;
+      font-weight: 500;
+      color: var(--text-primary);
+      margin-bottom: 2px;
     }
-    .drop-hint {
-      font-size: 0.85rem;
-      color: var(--muted);
+    .dropzone-desc {
+      font-size: 12px;
+      color: var(--text-muted);
     }
-    .selected-files {
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: 14px;
-      padding: 12px 16px;
+
+    /* Transfer Queue */
+    .queue-container {
+      flex: 1;
+      overflow-y: auto;
       display: flex;
       flex-direction: column;
       gap: 8px;
+      min-height: 0;
     }
-    .file-item {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      font-size: 0.9rem;
-    }
-    .section-title {
-      font-size: 0.9rem;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      color: var(--muted);
-      margin-bottom: 8px;
-    }
-    .peers-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-      gap: 12px;
-    }
-    .peer-card {
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: 14px;
-      padding: 16px;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      cursor: pointer;
-      transition: all 150ms ease;
-      text-align: left;
-    }
-    .peer-card:hover {
-      border-color: var(--accent);
-      transform: translateY(-2px);
-      box-shadow: var(--shadow);
-    }
-    .peer-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-    .peer-name {
-      font-weight: 600;
-      font-size: 0.95rem;
-    }
-    .peer-ip {
-      font-size: 0.8rem;
-      color: var(--muted);
-    }
-    .empty-state {
-      font-size: 0.9rem;
-      color: var(--muted);
-      padding: 24px;
-      text-align: center;
-      background: var(--surface);
-      border-radius: 14px;
-      border: 1px dashed var(--border);
-    }
-    .transfers-list {
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
+    .queue-label {
+      font-size: 12px;
+      color: var(--text-muted);
+      font-weight: 500;
+      margin-top: 4px;
     }
     .transfer-card {
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: 14px;
-      padding: 16px;
+      border: 0.5px solid var(--border);
+      border-radius: var(--radius);
+      padding: 10px 12px;
+      background: var(--surface-2);
       display: flex;
       flex-direction: column;
-      gap: 10px;
+      gap: 6px;
     }
-    .progress-track {
-      width: 100%;
-      height: 6px;
-      background: var(--border);
-      border-radius: 9999px;
-      overflow: hidden;
-    }
-    .progress-fill {
-      height: 100%;
-      background: var(--accent);
-      width: 0%;
-      transition: width 150ms linear;
-    }
-    .transfer-meta {
+    .transfer-card-header {
       display: flex;
       justify-content: space-between;
-      font-size: 0.8rem;
-      color: var(--muted);
+      align-items: center;
+      font-size: 13px;
     }
+    .transfer-card-title {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-weight: 500;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .transfer-card-meta {
+      font-size: 12px;
+      color: var(--text-secondary);
+      flex-shrink: 0;
+    }
+    .transfer-progress-bg {
+      height: 4px;
+      border-radius: 2px;
+      background: var(--surface-1);
+      overflow: hidden;
+    }
+    .transfer-progress-bar {
+      height: 4px;
+      border-radius: 2px;
+      background: var(--fill-accent);
+      width: 0%;
+      transition: width 200ms ease;
+    }
+    .transfer-card-controls {
+      display: flex;
+      justify-content: flex-end;
+      gap: 6px;
+      margin-top: 4px;
+    }
+    .transfer-card-controls button {
+      font-size: 11.5px;
+      padding: 3px 8px;
+      border-radius: 6px;
+      border: 0.5px solid var(--border);
+      background: transparent;
+      color: var(--text-secondary);
+      cursor: pointer;
+    }
+    .transfer-card-controls button:hover {
+      background: var(--surface-3);
+      color: var(--text-primary);
+    }
+
+    /* Pinned Bottom Bar */
+    .chat-bar {
+      margin-top: auto;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      padding-top: 6px;
+    }
+    .chat-input {
+      flex: 1;
+      padding: 8px 12px;
+      border-radius: 8px;
+      border: 0.5px solid var(--border);
+      background: var(--surface-1);
+      color: var(--text-primary);
+      font-size: 13.5px;
+      outline: none;
+    }
+    .chat-input:focus {
+      border-color: var(--border-accent);
+    }
+    .chat-btn {
+      width: 34px;
+      height: 34px;
+      border-radius: 8px;
+      border: 0.5px solid var(--border);
+      background: var(--surface-1);
+      color: var(--text-secondary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 16px;
+    }
+    .chat-btn:hover {
+      color: var(--text-primary);
+      background: var(--surface-3);
+    }
+    .chat-btn.primary {
+      background: var(--fill-accent);
+      color: var(--on-accent);
+      border-color: transparent;
+    }
+    .chat-btn.primary:hover {
+      background: #1d4ed8;
+    }
+
+    /* Modal dialogs */
     .modal-overlay {
       position: fixed;
       inset: 0;
-      background: rgba(0, 0, 0, 0.65);
-      backdrop-filter: blur(4px);
+      background: rgba(0, 0, 0, 0.45);
       display: none;
-      place-items: center;
-      padding: 16px;
+      align-items: center;
+      justify-content: center;
       z-index: 100;
     }
-    .modal-overlay.active { display: grid; }
+    .modal-overlay.active {
+      display: flex;
+    }
     .modal-card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 20px;
-      width: 100%;
-      max-width: 440px;
-      padding: 24px;
+      background: var(--surface-2);
+      border: 0.5px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+      width: 90%;
+      max-width: 420px;
       display: flex;
       flex-direction: column;
-      gap: 20px;
-      box-shadow: var(--shadow);
+      gap: 14px;
+      box-shadow: 0 12px 30px rgba(0,0,0,0.25);
     }
     .modal-header {
       display: flex;
+      align-items: center;
       justify-content: space-between;
-      align-items: center;
     }
-    .modal-title { font-size: 1.15rem; font-weight: 700; }
-    .form-group {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
-    .form-group label {
-      font-size: 0.85rem;
-      font-weight: 500;
-      color: var(--muted);
-    }
-    .form-input {
-      padding: 10px 14px;
-      border-radius: 10px;
-      border: 1px solid var(--border);
-      background: var(--card);
-      color: var(--text);
-      font-size: 0.95rem;
-    }
-    .form-input:focus {
-      outline: 2px solid var(--accent);
-    }
-    .checkbox-row {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      font-size: 0.9rem;
-      cursor: pointer;
-    }
-    .qr-container {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 12px;
-      padding: 16px;
-      background: var(--card);
-      border-radius: 12px;
-    }
-    .qr-box svg {
-      width: 180px;
-      height: 180px;
-      border-radius: 8px;
+    .modal-title {
+      font-size: 16px;
+      font-weight: 600;
     }
     .pairing-box {
-      background: var(--accent-subtle);
-      border: 1px dashed var(--accent);
-      border-radius: 12px;
-      padding: 16px;
+      background: var(--surface-1);
+      border: 0.5px solid var(--border);
+      border-radius: 8px;
+      padding: 14px;
       text-align: center;
     }
     .pairing-code {
-      font-size: 2rem;
-      font-weight: 800;
-      letter-spacing: 0.2em;
-      color: var(--accent);
+      font-size: 32px;
+      font-weight: 700;
+      letter-spacing: 6px;
+      color: var(--fill-accent);
+      font-family: monospace;
+      margin: 8px 0;
     }
-    .btn-primary {
-      background: var(--accent);
-      color: #fff;
-      font-weight: 600;
-      padding: 10px 18px;
-    }
-    .btn-primary:hover { background: var(--accent-hover); }
-    .btn-secondary {
-      border: 1px solid var(--border);
-      color: var(--text);
-      font-weight: 600;
-      padding: 10px 18px;
-    }
-    .btn-secondary:hover { background: var(--card); }
-    .btn-danger {
-      background: var(--danger);
-      color: #fff;
-      font-weight: 600;
-      padding: 10px 18px;
+
+    /* Mobile Responsive Adaptation */
+    @media (max-width: 768px) {
+      body { padding: 0; }
+      #app-container { height: 100vh; border-radius: 0; }
+      .app-frame {
+        grid-template-columns: 1fr;
+        grid-template-rows: 1fr 56px;
+        border-radius: 0;
+        border: none;
+      }
+      .sidebar { display: none; }
+      .icon-rail {
+        grid-row: 2;
+        flex-direction: row;
+        justify-content: space-around;
+        border-right: none;
+        border-top: 0.5px solid var(--border);
+        padding: 0 8px;
+      }
+      .rail-spacer { display: none; }
     }
   </style>
 </head>
 <body>
-  <div class="app">
-    <header>
-      <div class="brand">
-        <div class="logo" aria-label="Drop It Logo">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M12 3v12"/><polyline points="7 10 12 15 17 10"/><path d="M4 17a4 4 0 0 0 4 4h8a4 4 0 0 0 4-4v-2"/>
-          </svg>
+
+  <div id="app-container">
+    <div class="app-frame">
+
+      <!-- Column 1: Narrow Icon Rail (56px) -->
+      <nav class="icon-rail">
+        <button class="rail-btn active" id="tab-transfers" title="Transfers">
+          <i class="ti ti-arrows-exchange"></i>
+        </button>
+        <button class="rail-btn" id="tab-history" title="History">
+          <i class="ti ti-history"></i>
+        </button>
+        <button class="rail-btn" id="tab-favorites" title="Favorites">
+          <i class="ti ti-star"></i>
+        </button>
+        <button class="rail-btn" id="tab-nearby" title="Nearby">
+          <i class="ti ti-radar"></i>
+        </button>
+        <div class="rail-spacer"></div>
+        <button class="rail-btn" id="btn-theme" title="Toggle Theme">
+          <i class="ti ti-sun" id="theme-icon"></i>
+        </button>
+        <button class="rail-btn" id="btn-settings" title="Settings">
+          <i class="ti ti-settings"></i>
+        </button>
+      </nav>
+
+      <!-- Column 2: Device Sidebar (190px) -->
+      <aside class="sidebar">
+        <div class="section-label" style="margin-top:0;">This device</div>
+        <div class="this-device-box">
+          <div class="avatar-di">DI</div>
+          <span class="device-name-text" id="this-device-name">Drop It Node</span>
         </div>
-        <div class="title-group">
-          <h1>Drop It</h1>
-          <div class="device-pill">
-            <span class="pulse-dot"></span>
-            <span id="local-name">Loading...</span>
+
+        <input type="text" class="search-input" id="search-devices" placeholder="Search devices">
+
+        <div class="section-label">Favorites</div>
+        <div id="favorites-list">
+          <div class="peer-card fav selected" id="fav-placeholder">
+            <div class="peer-avatar">⭐</div>
+            <div class="peer-info">
+              <p class="peer-name">Waiting for peers...</p>
+              <p class="peer-status status-pair">Same Wi-Fi</p>
+            </div>
           </div>
         </div>
-      </div>
-      <div class="header-actions">
-        <button id="theme-btn" class="icon-btn" aria-label="Toggle theme">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
-          </svg>
-        </button>
-        <button id="settings-btn" class="icon-btn" aria-label="Settings">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-          </svg>
-        </button>
-      </div>
-    </header>
 
-    <!-- Drag and drop zone -->
-    <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="Drop files here or click to choose">
-      <input type="file" id="file-input" multiple style="display: none;">
-      <svg class="drop-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
-      </svg>
-      <div class="drop-text">Drop files here or tap to choose</div>
-      <div class="drop-hint">Local WiFi network only • Zero size limits • No cloud</div>
-    </div>
+        <div class="section-label">Nearby</div>
+        <div id="nearby-list">
+          <div id="peers-grid"></div>
+          <!-- Discovered peers populated dynamically -->
+        </div>
+      </aside>
 
-    <!-- Selected files preview -->
-    <div class="selected-files" id="selected-files" style="display: none;">
-      <div style="display: flex; justify-content: space-between; align-items: center;">
-        <span style="font-weight: 600;" id="selected-count">0 files selected</span>
-        <button id="clear-files-btn" class="icon-btn" style="min-height: 32px; min-width: 32px; padding: 4px;">Clear</button>
-      </div>
-      <div id="selected-list" style="display: flex; flex-direction: column; gap: 4px;"></div>
-    </div>
+      <!-- Column 3: Main Transfer Panel -->
+      <main class="main-panel">
+        <div class="main-header">
+          <div>
+            <p class="header-device-name" id="target-device-name">Select a device</p>
+            <p class="header-security-badge">
+              <i class="ti ti-lock"></i> Encrypted · TLS 1.3 · Same Wi-Fi
+            </p>
+          </div>
+          <div class="header-actions">
+            <button class="btn" id="btn-send-folder">Send folder</button>
+            <button class="btn btn-primary" id="btn-send-files">Send files</button>
+          </div>
+        </div>
 
-    <!-- Nearby devices section -->
-    <div>
-      <div class="section-title">Nearby Devices (Tap to Send)</div>
-      <div class="peers-grid" id="peers-grid"></div>
-      <div class="empty-state" id="peers-empty">Searching for nearby Drop It devices on your WiFi...</div>
-    </div>
+        <!-- Dashed Drop Zone -->
+        <div class="dropzone" id="dropzone">
+          <i class="ti ti-cloud-upload"></i>
+          <p class="dropzone-title">Drop files or folders here</p>
+          <p class="dropzone-desc">They send right away, no extra steps</p>
+          <input type="file" id="file-input" multiple style="display:none;">
+          <input type="file" id="folder-input" webkitdirectory directory multiple style="display:none;">
+        </div>
 
-    <!-- Active transfers section -->
-    <div id="transfers-section" style="display: none;">
-      <div class="section-title">Transfers</div>
-      <div class="transfers-list" id="transfers-list"></div>
+        <!-- Transfers Queue -->
+        <div class="queue-label">Transfers</div>
+        <div class="queue-container" id="transfers-container">
+          <div class="transfer-card" id="empty-queue-notice" style="border:none;background:transparent;text-align:center;color:var(--text-muted);font-size:12.5px;padding:18px 0;">
+            No active transfers. Drag & drop files above to send.
+          </div>
+        </div>
+
+        <!-- Pinned Bottom Bar -->
+        <div class="chat-bar">
+          <input type="text" class="chat-input" id="chat-input" placeholder="Type a message">
+          <button class="chat-btn" id="btn-clipboard" title="Paste clipboard text">
+            <i class="ti ti-clipboard"></i>
+          </button>
+          <button class="chat-btn primary" id="btn-send-chat" title="Send message">
+            <i class="ti ti-send"></i>
+          </button>
+        </div>
+      </main>
+
     </div>
   </div>
 
-  <!-- Offer Prompt Modal -->
+  <!-- Pairing Confirmation Modal -->
   <div class="modal-overlay" id="offer-modal">
     <div class="modal-card">
       <div class="modal-header">
         <div class="modal-title">Incoming File Transfer</div>
       </div>
       <div>
-        <p><strong id="offer-sender">Device</strong> wants to send you:</p>
-        <p id="offer-files-summary" style="color: var(--muted); margin-top: 4px;">0 file(s)</p>
+        <p><strong id="offer-sender">Peer</strong> wants to send you:</p>
+        <p id="offer-files-summary" style="color: var(--text-secondary); font-size:13px; margin-top: 4px;">1 file</p>
       </div>
       <div class="pairing-box">
-        <div style="font-size: 0.8rem; color: var(--muted); margin-bottom: 4px;">PAIRING CONFIRMATION CODE</div>
-        <div class="pairing-code" id="offer-pairing-code">----</div>
-        <div style="font-size: 0.75rem; color: var(--muted); margin-top: 4px;">Verify this matches sender's screen</div>
+        <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase;">Pairing Confirmation Code</div>
+        <div class="pairing-code" id="offer-pairing-code">------</div>
+        <div style="font-size: 11px; color: var(--text-muted);">Verify this matches the sender's screen</div>
       </div>
-      <div style="display: flex; gap: 10px; justify-content: flex-end;">
-        <button class="btn-secondary" id="decline-btn">Decline</button>
-        <button class="btn-primary" id="accept-btn">Accept</button>
+      <div style="display: flex; gap: 8px; justify-content: flex-end;">
+        <button class="btn" id="btn-decline-offer">Decline</button>
+        <button class="btn btn-primary" id="btn-accept-offer">Accept</button>
       </div>
     </div>
   </div>
@@ -483,328 +682,310 @@
     <div class="modal-card">
       <div class="modal-header">
         <div class="modal-title">Settings & Connect Phone</div>
-        <button class="icon-btn" id="close-settings-btn" style="min-height: 36px; min-width: 36px;">✕</button>
+        <button class="btn" id="btn-close-settings" style="padding:4px 8px;">✕</button>
       </div>
-      <div class="qr-container">
-        <div style="font-size: 0.85rem; font-weight: 600;">Scan with Phone to Connect</div>
-        <div class="qr-box" id="qr-box"></div>
-        <div style="font-size: 0.75rem; color: var(--muted);" id="local-url-display">https://...</div>
+      <div style="font-size:13px; color:var(--text-secondary);">
+        <p><strong>Device:</strong> <span id="settings-device-name"></span></p>
+        <p style="margin-top:6px;"><strong>Save to:</strong> <span id="settings-save-dir"></span></p>
+        <p style="margin-top:6px;"><strong>Local Web URL:</strong> <a id="settings-url" href="#" target="_blank" style="color:var(--text-accent);"></a></p>
       </div>
-      <div class="form-group">
-        <label for="setting-name">Device Name</label>
-        <input type="text" id="setting-name" class="form-input">
-      </div>
-      <div class="form-group">
-        <label for="setting-dir">Download Directory</label>
-        <input type="text" id="setting-dir" class="form-input" readonly>
-      </div>
-      <label class="checkbox-row">
-        <input type="checkbox" id="setting-auto-accept">
-        <span>Auto-accept transfers from trusted devices</span>
-      </label>
-      <label class="checkbox-row">
-        <input type="checkbox" id="setting-verify-hash">
-        <span>Verify BLAKE3 hash on receive</span>
-      </label>
-      <div style="display: flex; justify-content: flex-end; gap: 8px;">
-        <button class="btn-primary" id="save-settings-btn">Save Settings</button>
+      <div style="margin-top:10px; padding-top:10px; border-top:0.5px solid var(--border); font-size:12px; color:var(--text-muted); text-align:center;">
+        Drop It v0.1.0 • TLS 1.3 • Author: Golam Mowla
       </div>
     </div>
   </div>
 
   <script>
-    let selectedFiles = [];
-    let currentOffer = null;
     let localInfo = {};
+    let peers = [];
+    let selectedPeerId = null;
+    let currentOffer = null;
 
     const dropzone = document.getElementById('dropzone');
     const fileInput = document.getElementById('file-input');
-    const selectedFilesDiv = document.getElementById('selected-files');
-    const selectedList = document.getElementById('selected-list');
-    const selectedCount = document.getElementById('selected-count');
-    const clearFilesBtn = document.getElementById('clear-files-btn');
-    const peersGrid = document.getElementById('peers-grid');
-    const peersEmpty = document.getElementById('peers-empty');
-    const transfersSection = document.getElementById('transfers-section');
-    const transfersList = document.getElementById('transfers-list');
-    const offerModal = document.getElementById('offer-modal');
-    const settingsModal = document.getElementById('settings-modal');
+    const folderInput = document.getElementById('folder-input');
+    const btnSendFiles = document.getElementById('btn-send-files');
+    const btnSendFolder = document.getElementById('btn-send-folder');
+    const transfersContainer = document.getElementById('transfers-container');
+    const emptyQueueNotice = document.getElementById('empty-queue-notice');
+    const chatInput = document.getElementById('chat-input');
+    const btnSendChat = document.getElementById('btn-send-chat');
+    const btnClipboard = document.getElementById('btn-clipboard');
 
     // Theme toggle
-    document.getElementById('theme-btn').addEventListener('click', () => {
-      const current = document.documentElement.getAttribute('data-theme') ||
-        (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
-      const next = current === 'dark' ? 'light' : 'dark';
-      document.documentElement.setAttribute('data-theme', next);
-      localStorage.setItem('dropit_theme', next);
+    const btnTheme = document.getElementById('btn-theme');
+    const themeIcon = document.getElementById('theme-icon');
+    function applyTheme(isDark) {
+      if (isDark) {
+        document.documentElement.setAttribute('data-theme', 'dark');
+        themeIcon.className = 'ti ti-moon';
+      } else {
+        document.documentElement.setAttribute('data-theme', 'light');
+        themeIcon.className = 'ti ti-sun';
+      }
+    }
+    const savedTheme = localStorage.getItem('dropit_theme') || 'dark';
+    applyTheme(savedTheme === 'dark');
+    btnTheme.addEventListener('click', () => {
+      const isCurrentlyDark = document.documentElement.getAttribute('data-theme') === 'dark';
+      const next = !isCurrentlyDark;
+      applyTheme(next);
+      localStorage.setItem('dropit_theme', next ? 'dark' : 'light');
     });
-    const savedTheme = localStorage.getItem('dropit_theme');
-    if (savedTheme) document.documentElement.setAttribute('data-theme', savedTheme);
 
-    // Dropzone events
+    // File picking
+    btnSendFiles.addEventListener('click', () => fileInput.click());
+    btnSendFolder.addEventListener('click', () => folderInput.click());
     dropzone.addEventListener('click', () => fileInput.click());
-    dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('dragover'); });
+
+    dropzone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropzone.classList.add('dragover');
+    });
     dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
     dropzone.addEventListener('drop', (e) => {
       e.preventDefault();
       dropzone.classList.remove('dragover');
-      if (e.dataTransfer.files.length) handleFilesChosen(e.dataTransfer.files);
-    });
-    fileInput.addEventListener('change', () => {
-      if (fileInput.files.length) handleFilesChosen(fileInput.files);
+      if (e.dataTransfer.files.length) {
+        uploadFiles(Array.from(e.dataTransfer.files));
+      }
     });
 
-    function handleFilesChosen(files) {
-      selectedFiles = Array.from(files);
-      selectedList.innerHTML = '';
-      let totalSize = 0;
-      selectedFiles.forEach(f => {
-        totalSize += f.size;
-        const row = document.createElement('div');
-        row.className = 'file-item';
-        row.innerHTML = `<span>📄 ${escapeHtml(f.name)}</span><span style="color:var(--muted);">${formatSize(f.size)}</span>`;
-        selectedList.appendChild(row);
+    fileInput.addEventListener('change', () => {
+      if (fileInput.files.length) {
+        uploadFiles(Array.from(fileInput.files));
+        fileInput.value = '';
+      }
+    });
+    folderInput.addEventListener('change', () => {
+      if (folderInput.files.length) {
+        uploadFiles(Array.from(folderInput.files));
+        folderInput.value = '';
+      }
+    });
+
+    // Clipboard paste
+    btnClipboard.addEventListener('click', async () => {
+      try {
+        const text = await navigator.clipboard.readText();
+        if (text) {
+          chatInput.value = text;
+          sendChat();
+        }
+      } catch (e) {
+        console.warn('Clipboard read failed', e);
+      }
+    });
+
+    btnSendChat.addEventListener('click', sendChat);
+    chatInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') sendChat();
+    });
+
+    function sendChat() {
+      const msg = chatInput.value.trim();
+      if (!msg) return;
+      chatInput.value = '';
+      // Create local transfer card for message
+      addTransferCard({
+        id: 'msg-' + Date.now(),
+        name: '💬 ' + msg,
+        meta: 'Sent',
+        progress: 100,
+        completed: true
       });
-      selectedCount.innerText = `${selectedFiles.length} file(s) (${formatSize(totalSize)})`;
-      selectedFilesDiv.style.display = 'flex';
+      fetch('/api/chat/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: msg, target_peer_id: selectedPeerId })
+      }).catch(console.error);
     }
 
-    clearFilesBtn.addEventListener('click', () => {
-      selectedFiles = [];
-      fileInput.value = '';
-      selectedFilesDiv.style.display = 'none';
-    });
+    function uploadFiles(files) {
+      if (!files.length) return;
+      emptyQueueNotice.style.display = 'none';
 
-    // Fetch initial device info & peers
-    async function init() {
+      files.forEach(f => {
+        const id = 'transfer-' + Math.random().toString(36).substring(2, 9);
+        const card = addTransferCard({
+          id: id,
+          name: f.name,
+          meta: '0% · Preparing...',
+          progress: 5,
+          completed: false
+        });
+
+        const formData = new FormData();
+        formData.append('file', f);
+        formData.append('target_peer_id', selectedPeerId || '');
+
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', '/api/transfer/upload');
+
+        const startTime = Date.now();
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) {
+            const pct = Math.round((e.loaded / e.total) * 100);
+            const elapsedSec = (Date.now() - startTime) / 1000;
+            const speedMb = elapsedSec > 0 ? ((e.loaded / (1024 * 1024)) / elapsedSec).toFixed(1) : 0;
+            updateTransferCard(id, pct, `${pct}% · ${speedMb} MB/s`);
+          }
+        };
+
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            updateTransferCard(id, 100, 'Sent', true);
+          } else {
+            updateTransferCard(id, 100, 'Failed', false, true);
+          }
+        };
+        xhr.onerror = () => {
+          updateTransferCard(id, 100, 'Connection lost', false, true);
+        };
+
+        card.cancelBtn.onclick = () => {
+          xhr.abort();
+          updateTransferCard(id, 100, 'Cancelled', false, true);
+        };
+
+        xhr.send(formData);
+      });
+    }
+
+    function addTransferCard({ id, name, meta, progress, completed }) {
+      emptyQueueNotice.style.display = 'none';
+      const div = document.createElement('div');
+      div.className = 'transfer-card';
+      div.id = id;
+
+      const icon = name.endsWith('.mp4') || name.endsWith('.mkv') ? 'ti-video' :
+                   name.endsWith('.png') || name.endsWith('.jpg') ? 'ti-photo' : 'ti-file-text';
+
+      div.innerHTML = `
+        <div class="transfer-card-header">
+          <span class="transfer-card-title"><i class="ti ${icon}"></i> ${escapeHtml(name)}</span>
+          <span class="transfer-card-meta">${meta}</span>
+        </div>
+        <div class="transfer-progress-bg">
+          <div class="transfer-progress-bar" style="width: ${progress}%;"></div>
+        </div>
+        <div class="transfer-card-controls">
+          <button class="btn-cancel">Cancel</button>
+        </div>
+      `;
+
+      transfersContainer.prepend(div);
+      return {
+        card: div,
+        cancelBtn: div.querySelector('.btn-cancel')
+      };
+    }
+
+    function updateTransferCard(id, progress, meta, completed = false, error = false) {
+      const card = document.getElementById(id);
+      if (!card) return;
+      const bar = card.querySelector('.transfer-progress-bar');
+      const metaSpan = card.querySelector('.transfer-card-meta');
+      const controls = card.querySelector('.transfer-card-controls');
+
+      if (bar) bar.style.width = progress + '%';
+      if (metaSpan) {
+        metaSpan.textContent = meta;
+        if (completed) metaSpan.style.color = 'var(--text-success)';
+        if (error) metaSpan.style.color = '#ef4444';
+      }
+      if (completed || error) {
+        if (controls) controls.style.display = 'none';
+      }
+    }
+
+    // Load initial info
+    async function loadInfo() {
       try {
         const res = await fetch('/api/info');
         if (res.ok) {
           localInfo = await res.json();
-          document.getElementById('local-name').innerText = localInfo.name || 'Drop It Node';
-          document.getElementById('setting-name').value = localInfo.name || '';
-          document.getElementById('setting-dir').value = localInfo.download_dir || '';
-          document.getElementById('setting-auto-accept').checked = !!localInfo.auto_accept_trusted;
-          document.getElementById('setting-verify-hash').checked = localInfo.verify_hash !== false;
-          
-          const localUrl = `https://${window.location.hostname}:${localInfo.port}`;
-          document.getElementById('local-url-display').innerText = localUrl;
-          loadQrCode();
+          document.getElementById('this-device-name').textContent = localInfo.name || 'Drop It Node';
+          document.getElementById('settings-device-name').textContent = localInfo.name || 'Drop It Node';
+          document.getElementById('settings-save-dir').textContent = localInfo.download_dir || 'Downloads';
+          const localUrl = `https://${window.location.hostname}:${localInfo.port || 9090}`;
+          const urlLink = document.getElementById('settings-url');
+          urlLink.textContent = localUrl;
+          urlLink.href = localUrl;
         }
       } catch (e) {
-        console.error('Failed to fetch /api/info', e);
+        console.warn('Failed to load /api/info', e);
       }
-      fetchPeers();
-      initEvents();
+      loadPeers();
     }
 
-    async function loadQrCode() {
-      try {
-        const res = await fetch('/api/qr');
-        if (res.ok) {
-          const svg = await res.text();
-          document.getElementById('qr-box').innerHTML = svg;
-        }
-      } catch (e) {}
-    }
-
-    async function fetchPeers() {
+    async function loadPeers() {
       try {
         const res = await fetch('/api/peers');
         if (res.ok) {
-          const data = await res.json();
-          renderPeers(data.peers || []);
-        }
-      } catch (e) {}
-    }
-
-    function renderPeers(peers) {
-      peersGrid.innerHTML = '';
-      if (!peers.length) {
-        peersEmpty.style.display = 'block';
-        return;
-      }
-      peersEmpty.style.display = 'none';
-      peers.forEach(peer => {
-        const card = document.createElement('div');
-        card.className = 'peer-card';
-        card.innerHTML = `
-          <div class="peer-header">
-            <span class="peer-name">${escapeHtml(peer.name)}</span>
-            <span class="pulse-dot"></span>
-          </div>
-          <div class="peer-ip">${escapeHtml(peer.address)}:${peer.port}</div>
-          <div style="font-size:0.75rem; color:var(--muted);">${escapeHtml(peer.source)}</div>
-        `;
-        card.addEventListener('click', () => sendToPeer(peer));
-        peersGrid.appendChild(card);
-      });
-    }
-
-    async function sendToPeer(peer) {
-      if (!selectedFiles.length) {
-        alert('Please select or drop files first!');
-        fileInput.click();
-        return;
-      }
-      const target = `${peer.address}:${peer.port}`;
-      const transferId = 'tx_' + Math.random().toString(36).substring(2, 9);
-      createTransferItem(transferId, `Sending to ${peer.name}`);
-
-      const formData = new FormData();
-      formData.append('target', target);
-      selectedFiles.forEach(f => formData.append('files', f));
-
-      try {
-        const xhr = new XMLHttpRequest();
-        xhr.open('POST', '/api/web_send');
-        xhr.upload.onprogress = (e) => {
-          if (e.lengthComputable) {
-            const pct = (e.loaded / e.total) * 100;
-            updateTransferItem(transferId, pct, formatSize(e.loaded), formatSize(e.total));
-          }
-        };
-        xhr.onload = () => {
-          if (xhr.status === 200) {
-            completeTransferItem(transferId, 'Completed!');
-            clearFilesBtn.click();
-          } else {
-            failTransferItem(transferId, 'Transfer rejected or failed');
-          }
-        };
-        xhr.onerror = () => failTransferItem(transferId, 'Network error');
-        xhr.send(formData);
-      } catch (err) {
-        failTransferItem(transferId, err.message);
-      }
-    }
-
-    function createTransferItem(id, label) {
-      transfersSection.style.display = 'block';
-      const card = document.createElement('div');
-      card.className = 'transfer-card';
-      card.id = id;
-      card.innerHTML = `
-        <div style="display: flex; justify-content: space-between; font-weight: 600; font-size: 0.9rem;">
-          <span>${escapeHtml(label)}</span>
-          <span class="status-text">Starting...</span>
-        </div>
-        <div class="progress-track"><div class="progress-fill" style="width: 0%;"></div></div>
-        <div class="transfer-meta"><span>--</span><span>0%</span></div>
-      `;
-      transfersList.prepend(card);
-    }
-
-    function updateTransferItem(id, pct, loaded, total) {
-      const card = document.getElementById(id);
-      if (!card) return;
-      card.querySelector('.progress-fill').style.width = `${pct}%`;
-      card.querySelector('.status-text').innerText = `${pct.toFixed(0)}%`;
-      card.querySelector('.transfer-meta').innerHTML = `<span>${loaded} / ${total}</span><span>${pct.toFixed(1)}%</span>`;
-    }
-
-    function completeTransferItem(id, msg) {
-      const card = document.getElementById(id);
-      if (!card) return;
-      card.querySelector('.progress-fill').style.width = '100%';
-      card.querySelector('.status-text').innerText = '✔️ ' + msg;
-      card.querySelector('.status-text').style.color = 'var(--success)';
-    }
-
-    function failTransferItem(id, msg) {
-      const card = document.getElementById(id);
-      if (!card) return;
-      card.querySelector('.status-text').innerText = '❌ ' + msg;
-      card.querySelector('.status-text').style.color = 'var(--danger)';
-    }
-
-    // SSE Realtime Event Stream
-    function initEvents() {
-      const evt = new EventSource('/api/events');
-      evt.addEventListener('peers', (e) => {
-        try { renderPeers(JSON.parse(e.data)); } catch (err) {}
-      });
-      evt.addEventListener('offer', (e) => {
-        try {
-          currentOffer = JSON.parse(e.data);
-          document.getElementById('offer-sender').innerText = currentOffer.sender_name;
-          document.getElementById('offer-files-summary').innerText =
-            `${currentOffer.files.length} file(s) (${formatSize(currentOffer.total_bytes)})`;
-          document.getElementById('offer-pairing-code').innerText = currentOffer.pairing_code;
-          offerModal.classList.add('active');
-        } catch (err) {}
-      });
-      evt.addEventListener('progress', (e) => {
-        try {
-          const p = JSON.parse(e.data);
-          updateTransferItem(p.transfer_id, p.percent, formatSize(p.loaded), formatSize(p.total));
-        } catch (err) {}
-      });
-      evt.onerror = () => { setTimeout(fetchPeers, 2000); };
-    }
-
-    // Offer modal buttons
-    document.getElementById('accept-btn').addEventListener('click', async () => {
-      if (!currentOffer) return;
-      offerModal.classList.remove('active');
-      await sendDecision(currentOffer.decision_id, true);
-    });
-    document.getElementById('decline-btn').addEventListener('click', async () => {
-      if (!currentOffer) return;
-      offerModal.classList.remove('active');
-      await sendDecision(currentOffer.decision_id, false);
-    });
-    async function sendDecision(decisionId, accepted) {
-      try {
-        await fetch('/api/decision', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ decision_id: decisionId, accepted })
-        });
-      } catch (e) {}
-    }
-
-    // Settings Modal
-    document.getElementById('settings-btn').addEventListener('click', () => {
-      settingsModal.classList.add('active');
-    });
-    document.getElementById('close-settings-btn').addEventListener('click', () => {
-      settingsModal.classList.remove('active');
-    });
-    document.getElementById('save-settings-btn').addEventListener('click', async () => {
-      const name = document.getElementById('setting-name').value.trim();
-      const autoAccept = document.getElementById('setting-auto-accept').checked;
-      const verifyHash = document.getElementById('setting-verify-hash').checked;
-      try {
-        const res = await fetch('/api/settings', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name, auto_accept_trusted: autoAccept, verify_hash: verifyHash })
-        });
-        if (res.ok) {
-          settingsModal.classList.remove('active');
-          init();
+          peers = await res.json();
+          renderPeers();
         }
       } catch (e) {
-        alert('Failed to save settings: ' + e);
+        console.warn('Failed to load /api/peers', e);
       }
-    });
-
-    function formatSize(bytes) {
-      if (bytes === 0) return '0 B';
-      const k = 1024;
-      const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-      const i = Math.floor(Math.log(bytes) / Math.log(k));
-      return (bytes / Math.pow(k, i)).toFixed(i === 0 ? 0 : 1) + ' ' + sizes[i];
     }
+
+    function renderPeers() {
+      const nearbyList = document.getElementById('nearby-list');
+      const favList = document.getElementById('favorites-list');
+      nearbyList.innerHTML = '';
+
+      if (!peers.length) {
+        nearbyList.innerHTML = '<div style="padding:8px;font-size:12px;color:var(--text-muted);">Searching nearby...</div>';
+        return;
+      }
+
+      peers.forEach(peer => {
+        const card = document.createElement('div');
+        card.className = 'peer-card nearby' + (selectedPeerId === peer.id ? ' selected' : '');
+        const initial = (peer.name || 'P').charAt(0).toUpperCase();
+
+        card.innerHTML = `
+          <div class="peer-avatar">${initial}</div>
+          <div class="peer-info">
+            <p class="peer-name">${escapeHtml(peer.name)}</p>
+            <p class="peer-status status-online">Online</p>
+          </div>
+        `;
+
+        card.addEventListener('click', () => {
+          selectedPeerId = peer.id;
+          document.getElementById('target-device-name').textContent = peer.name;
+          document.querySelectorAll('.peer-card').forEach(c => c.classList.remove('selected'));
+          card.classList.add('selected');
+        });
+
+        nearbyList.appendChild(card);
+      });
+
+      // Default select first peer if none selected
+      if (!selectedPeerId && peers.length) {
+        selectedPeerId = peers[0].id;
+        document.getElementById('target-device-name').textContent = peers[0].name;
+      }
+    }
+
+    // Modal settings
+    const btnSettings = document.getElementById('btn-settings');
+    const settingsModal = document.getElementById('settings-modal');
+    const btnCloseSettings = document.getElementById('btn-close-settings');
+    btnSettings.addEventListener('click', () => settingsModal.classList.add('active'));
+    btnCloseSettings.addEventListener('click', () => settingsModal.classList.remove('active'));
+
     function escapeHtml(str) {
       return (str || '').replace(/[&<>"']/g, m => ({
         '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
-      }[m]));
+      })[m]);
     }
 
-    setInterval(fetchPeers, 3000);
-    window.addEventListener('DOMContentLoaded', init);
+    loadInfo();
+    setInterval(loadPeers, 3000);
   </script>
 </body>
 </html>
