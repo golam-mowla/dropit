@@ -82,10 +82,13 @@ async fn main() -> Result<()> {
         // If launched via double-click, shortcut, or Explorer, NO console window is created.
         unsafe extern "system" {
             fn AttachConsole(dwProcessId: u32) -> i32;
+            fn SetCurrentProcessExplicitAppUserModelID(app_id: *const u16) -> i32;
         }
         const ATTACH_PARENT_PROCESS: u32 = 0xFFFFFFFF;
         unsafe {
             let _ = AttachConsole(ATTACH_PARENT_PROCESS);
+            let app_id: Vec<u16> = "GolamMowla.DropIt.App.1.0\0".encode_utf16().collect();
+            let _ = SetCurrentProcessExplicitAppUserModelID(app_id.as_ptr());
         }
     }
 
@@ -305,6 +308,7 @@ async fn handle_send_command(
         sender_name: config.device_name.clone(),
         sender_device_id: config.device_id.clone(),
         sender_fingerprint: identity.fingerprint.clone(),
+        sender_port: config.port,
         files: meta_list.clone(),
     };
 

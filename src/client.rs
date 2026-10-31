@@ -69,12 +69,16 @@ impl DropItClient {
         host_port: &str,
         sender_id: &str,
         sender_name: &str,
+        sender_port: u16,
+        sender_fingerprint: &str,
         text: &str,
     ) -> Result<()> {
         let url = format!("https://{host_port}/api/message");
         let payload = serde_json::json!({
             "sender_id": sender_id,
             "sender_name": sender_name,
+            "sender_port": sender_port,
+            "sender_fingerprint": sender_fingerprint,
             "text": text,
         });
         let res = self

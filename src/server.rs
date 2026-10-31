@@ -91,6 +91,14 @@ pub struct QuickMessagePayload {
     pub sender_id: String,
     pub sender_name: String,
     pub text: String,
+    #[serde(default = "default_server_port")]
+    pub sender_port: u16,
+    #[serde(default)]
+    pub sender_fingerprint: Option<String>,
+}
+
+fn default_server_port() -> u16 {
+    53420
 }
 
 pub struct OfferDecisionRequest {
@@ -396,8 +404,28 @@ async fn handle_post_decision(
 
 async fn handle_post_message(
     State(state): State<ServerState>,
+    axum::extract::ConnectInfo(peer_addr): axum::extract::ConnectInfo<SocketAddr>,
     Json(payload): Json<QuickMessagePayload>,
 ) -> impl IntoResponse {
+    // Auto-register sender as active peer to ensure two-way communication works instantly
+    if let Some(ref reg) = state.peer_registry {
+        let mut peer_http_addr = peer_addr;
+        peer_http_addr.set_port(payload.sender_port);
+        let announcement = crate::discovery::DeviceAnnouncement {
+            device_id: payload.sender_id.clone(),
+            name: payload.sender_name.clone(),
+            fingerprint: payload.sender_fingerprint.clone().unwrap_or_default(),
+            port: payload.sender_port,
+            version: "0.1.0".to_string(),
+        };
+        reg.update_or_insert(
+            announcement,
+            peer_http_addr,
+            crate::discovery::DiscoverySource::Direct,
+        )
+        .await;
+    }
+
     let _ = state.sse_broadcast_tx.send(WebSseEvent::Message {
         sender_id: payload.sender_id,
         sender_name: payload.sender_name,
@@ -466,9 +494,9 @@ async fn handle_post_web_send(
 
     // Initiate transfer to target device via DropItClient
     let client = DropItClient::new();
-    let (local_device_id, local_name) = {
+    let (local_device_id, local_name, local_port) = {
         let cfg = state.config.read().await;
-        (cfg.device_id.clone(), cfg.device_name.clone())
+        (cfg.device_id.clone(), cfg.device_name.clone(), cfg.port)
     };
 
     let session_id = hex::encode(rand::random::<[u8; 16]>());
@@ -492,6 +520,7 @@ async fn handle_post_web_send(
         sender_device_id: local_device_id,
         sender_fingerprint: state.identity.fingerprint.clone(),
         files: file_metas.clone(),
+        sender_port: local_port,
     };
 
     let offer_resp = client
@@ -554,6 +583,25 @@ async fn handle_post_offer(
             return Err((StatusCode::TOO_MANY_REQUESTS, "Rate limit exceeded".into()));
         }
         recent.insert(peer_addr.ip(), now);
+    }
+
+    // Auto-register sender into peer registry for seamless two-way connectivity
+    if let Some(ref reg) = state.peer_registry {
+        let mut peer_http_addr = peer_addr;
+        peer_http_addr.set_port(offer.sender_port);
+        let announcement = crate::discovery::DeviceAnnouncement {
+            device_id: offer.sender_device_id.clone(),
+            name: offer.sender_name.clone(),
+            fingerprint: offer.sender_fingerprint.clone(),
+            port: offer.sender_port,
+            version: "0.1.0".to_string(),
+        };
+        reg.update_or_insert(
+            announcement,
+            peer_http_addr,
+            crate::discovery::DiscoverySource::Direct,
+        )
+        .await;
     }
 
     // 3. Concurrent sessions cap & expired cleanup

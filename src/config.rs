@@ -25,6 +25,16 @@ pub fn generate_random_device_name() -> String {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SavedPeer {
+    pub device_id: String,
+    pub name: String,
+    pub fingerprint: String,
+    pub address: String,
+    pub port: u16,
+    pub last_seen_unix: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DropItConfig {
     pub device_id: String,
     pub device_name: String,
@@ -38,6 +48,8 @@ pub struct DropItConfig {
     pub favorites: Vec<String>,
     #[serde(default)]
     pub nicknames: HashMap<String, String>,
+    #[serde(default)]
+    pub recent_devices: Vec<SavedPeer>,
     #[serde(default = "default_true")]
     pub minimize_to_tray: bool,
     #[serde(default)]
@@ -68,6 +80,7 @@ impl Default for DropItConfig {
             trusted_devices: HashMap::new(),
             favorites: Vec::new(),
             nicknames: HashMap::new(),
+            recent_devices: Vec::new(),
             minimize_to_tray: true,
             run_on_startup: false,
             context_menu_enabled: true,
@@ -185,6 +198,46 @@ impl DropItConfig {
             }
             None => PeerTrustStatus::Untrusted,
         }
+    }
+
+    pub fn record_discovered_peer(
+        &mut self,
+        device_id: &str,
+        name: &str,
+        fingerprint: &str,
+        address: &str,
+        port: u16,
+    ) {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        if let Some(pos) = self
+            .recent_devices
+            .iter()
+            .position(|p| p.device_id == device_id)
+        {
+            self.recent_devices[pos].name = name.to_string();
+            self.recent_devices[pos].fingerprint = fingerprint.to_string();
+            self.recent_devices[pos].address = address.to_string();
+            self.recent_devices[pos].port = port;
+            self.recent_devices[pos].last_seen_unix = now;
+        } else {
+            self.recent_devices.push(SavedPeer {
+                device_id: device_id.to_string(),
+                name: name.to_string(),
+                fingerprint: fingerprint.to_string(),
+                address: address.to_string(),
+                port,
+                last_seen_unix: now,
+            });
+        }
+        if self.recent_devices.len() > 50 {
+            self.recent_devices
+                .sort_by_key(|p| std::cmp::Reverse(p.last_seen_unix));
+            self.recent_devices.truncate(50);
+        }
+        let _ = self.save();
     }
 }
 

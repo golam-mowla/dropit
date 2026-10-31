@@ -18,6 +18,12 @@ pub struct TransferOfferRequest {
     pub sender_device_id: String,
     pub sender_fingerprint: String,
     pub files: Vec<FileMetadata>,
+    #[serde(default = "default_port")]
+    pub sender_port: u16,
+}
+
+fn default_port() -> u16 {
+    53420
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

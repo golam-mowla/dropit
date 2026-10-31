@@ -19,9 +19,11 @@ pub struct GuiPeer {
     pub id: String,
     pub name: String,
     pub addr: String,
+    pub port: u16,
     pub fingerprint: String,
     pub version: String,
     pub last_seen: Instant,
+    pub is_online: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -165,18 +167,50 @@ impl DropItApp {
         tx_actions: tokio::sync::mpsc::Sender<GuiAction>,
         start_in_tray: bool,
     ) -> Self {
-        // Configure custom fonts / styling
+        // Configure custom fonts / modern styling
         let mut visuals = egui::Visuals::dark();
-        visuals.override_text_color = Some(egui::Color32::from_rgb(244, 244, 245));
-        visuals.panel_fill = egui::Color32::from_rgb(17, 19, 26);
-        visuals.window_fill = egui::Color32::from_rgb(23, 26, 36);
-        visuals.faint_bg_color = egui::Color32::from_rgb(30, 34, 48);
-        visuals.extreme_bg_color = egui::Color32::from_rgb(12, 14, 20);
-        visuals.widgets.noninteractive.bg_fill = egui::Color32::from_rgb(25, 29, 41);
-        visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(32, 37, 52);
-        visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(45, 52, 74);
-        visuals.widgets.active.bg_fill = egui::Color32::from_rgb(79, 70, 229);
+        visuals.override_text_color = Some(egui::Color32::from_rgb(243, 244, 246));
+        visuals.panel_fill = egui::Color32::from_rgb(15, 17, 23);
+        visuals.window_fill = egui::Color32::from_rgb(20, 24, 33);
+        visuals.faint_bg_color = egui::Color32::from_rgb(25, 29, 40);
+        visuals.extreme_bg_color = egui::Color32::from_rgb(11, 13, 18);
+        visuals.widgets.noninteractive.bg_fill = egui::Color32::from_rgb(22, 26, 36);
+        visuals.widgets.noninteractive.corner_radius = 8.0.into();
+        visuals.widgets.inactive.bg_fill = egui::Color32::from_rgb(28, 33, 46);
+        visuals.widgets.inactive.corner_radius = 8.0.into();
+        visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(37, 44, 62);
+        visuals.widgets.hovered.corner_radius = 8.0.into();
+        visuals.widgets.active.bg_fill = egui::Color32::from_rgb(59, 130, 246);
+        visuals.widgets.active.corner_radius = 8.0.into();
         cc.egui_ctx.set_visuals(visuals);
+
+        // Pre-populate discovered peers from persistent history
+        let mut peers = HashMap::new();
+        for saved in &config.recent_devices {
+            peers.insert(
+                saved.device_id.clone(),
+                GuiPeer {
+                    id: saved.device_id.clone(),
+                    name: saved.name.clone(),
+                    addr: format!("{}:{}", saved.address, saved.port),
+                    port: saved.port,
+                    fingerprint: saved.fingerprint.clone(),
+                    version: "0.1.0".to_string(),
+                    last_seen: Instant::now() - Duration::from_secs(3600),
+                    is_online: false,
+                },
+            );
+        }
+
+        let selected_peer_id = if !peers.is_empty() {
+            config
+                .favorites
+                .first()
+                .cloned()
+                .or_else(|| peers.keys().next().cloned())
+        } else {
+            None
+        };
 
         // System Tray setup
         let tray_menu = tray_icon::menu::Menu::new();
@@ -217,8 +251,8 @@ impl DropItApp {
         Self {
             config,
             identity,
-            peers: HashMap::new(),
-            selected_peer_id: None,
+            peers,
+            selected_peer_id,
             chat_history: HashMap::new(),
             text_input: String::new(),
             search_query: String::new(),
@@ -389,6 +423,20 @@ fn color_for_name(name: &str) -> egui::Color32 {
     colors[(hash as usize) % colors.len()]
 }
 
+fn get_file_type_icon(name: &str) -> &'static str {
+    let ext = name.rsplit('.').next().unwrap_or("").to_lowercase();
+    match ext.as_str() {
+        "pdf" | "doc" | "docx" | "txt" | "md" | "rtf" => "📄",
+        "jpg" | "jpeg" | "png" | "gif" | "webp" | "svg" | "bmp" | "ico" => "🖼️",
+        "mp3" | "wav" | "flac" | "ogg" | "m4a" | "aac" => "🎵",
+        "mp4" | "mkv" | "avi" | "mov" | "webm" => "🎬",
+        "zip" | "rar" | "7z" | "tar" | "gz" | "bz2" => "📦",
+        "exe" | "msi" | "bat" | "cmd" | "ps1" => "⚙️",
+        "rs" | "py" | "js" | "ts" | "html" | "css" | "json" | "c" | "cpp" => "💻",
+        _ => "📁",
+    }
+}
+
 impl eframe::App for DropItApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Handle window close request -> minimize to tray if enabled
@@ -424,11 +472,31 @@ impl eframe::App for DropItApp {
         // Receive backend events
         while let Ok(event) = self.rx_events.try_recv() {
             match event {
-                GuiEvent::PeerAdded(peer) => {
-                    self.peers.insert(peer.id.clone(), peer);
+                GuiEvent::PeerAdded(mut peer) => {
+                    peer.is_online = true;
+                    let (ip_str, port_u16) = if let Some((ip, port)) = peer.addr.split_once(':') {
+                        (ip, port.parse().unwrap_or(peer.port))
+                    } else {
+                        (peer.addr.as_str(), peer.port)
+                    };
+                    self.config.record_discovered_peer(
+                        &peer.id,
+                        &peer.name,
+                        &peer.fingerprint,
+                        ip_str,
+                        port_u16,
+                    );
+                    let pid = peer.id.clone();
+                    self.peers.insert(pid.clone(), peer);
+                    if self.selected_peer_id.is_none() {
+                        self.selected_peer_id = Some(pid);
+                    }
                 }
                 GuiEvent::PeerRemoved(id) => {
-                    self.peers.remove(&id);
+                    // Do not discard device from UI: keep in history, mark offline
+                    if let Some(p) = self.peers.get_mut(&id) {
+                        p.is_online = false;
+                    }
                 }
                 GuiEvent::IncomingOffer(req) => {
                     let peer_id = req.offer.sender_device_id.clone();
@@ -769,13 +837,16 @@ impl DropItApp {
                 .collect();
 
             let mut fav_peers = Vec::new();
-            let mut other_peers = Vec::new();
+            let mut online_peers = Vec::new();
+            let mut recent_peers = Vec::new();
 
             for p in filtered_peers {
                 if self.config.is_favorite(&p.id) {
                     fav_peers.push(p);
+                } else if p.is_online {
+                    online_peers.push(p);
                 } else {
-                    other_peers.push(p);
+                    recent_peers.push(p);
                 }
             }
 
@@ -784,7 +855,7 @@ impl DropItApp {
                 ui.horizontal(|ui| {
                     ui.add_space(14.0);
                     ui.label(
-                        egui::RichText::new("⭐ FAVORITES")
+                        egui::RichText::new(format!("⭐ FAVORITES ({})", fav_peers.len()))
                             .size(11.0)
                             .strong()
                             .color(egui::Color32::from_rgb(251, 191, 36)),
@@ -797,37 +868,57 @@ impl DropItApp {
                 ui.add_space(10.0);
             }
 
-            // Nearby Devices Section
-            ui.horizontal(|ui| {
-                ui.add_space(14.0);
-                ui.label(
-                    egui::RichText::new(format!("📡 NEARBY DEVICES ({})", other_peers.len()))
-                        .size(11.0)
-                        .strong()
-                        .color(egui::Color32::from_rgb(156, 163, 175)),
-                );
-            });
-            ui.add_space(4.0);
+            // Online Nearby Section
+            if !online_peers.is_empty() {
+                ui.horizontal(|ui| {
+                    ui.add_space(14.0);
+                    ui.label(
+                        egui::RichText::new(format!("🟢 ONLINE NEARBY ({})", online_peers.len()))
+                            .size(11.0)
+                            .strong()
+                            .color(egui::Color32::from_rgb(16, 185, 129)),
+                    );
+                });
+                ui.add_space(4.0);
+                for p in online_peers {
+                    self.render_peer_item(ui, &p);
+                }
+                ui.add_space(10.0);
+            }
 
-            if other_peers.is_empty() && self.peers.is_empty() {
+            // Recent History Section
+            if !recent_peers.is_empty() {
+                ui.horizontal(|ui| {
+                    ui.add_space(14.0);
+                    ui.label(
+                        egui::RichText::new(format!("🕒 RECENT HISTORY ({})", recent_peers.len()))
+                            .size(11.0)
+                            .strong()
+                            .color(egui::Color32::from_rgb(156, 163, 175)),
+                    );
+                });
+                ui.add_space(4.0);
+                for p in recent_peers {
+                    self.render_peer_item(ui, &p);
+                }
+                ui.add_space(10.0);
+            }
+
+            if self.peers.is_empty() {
                 ui.add_space(30.0);
                 ui.vertical_centered(|ui| {
                     ui.label(
                         egui::RichText::new("Looking for devices...")
                             .size(13.0)
-                            .color(egui::Color32::from_rgb(107, 114, 128)),
+                            .color(egui::Color32::from_rgb(156, 163, 175)),
                     );
                     ui.add_space(6.0);
                     ui.label(
                         egui::RichText::new("Open Drop It on other devices on the same WiFi")
                             .size(11.0)
-                            .color(egui::Color32::from_rgb(75, 85, 99)),
+                            .color(egui::Color32::from_rgb(107, 114, 128)),
                     );
                 });
-            } else {
-                for p in other_peers {
-                    self.render_peer_item(ui, &p);
-                }
             }
         });
     }
@@ -840,29 +931,36 @@ impl DropItApp {
             .get_display_name(&peer.id, &peer.name)
             .to_string();
 
-        let bg_color = if is_selected {
-            egui::Color32::from_rgb(45, 52, 74)
+        let (bg_color, stroke) = if is_selected {
+            (
+                egui::Color32::from_rgb(33, 40, 58),
+                egui::Stroke::new(1.5_f32, egui::Color32::from_rgb(59, 130, 246)),
+            )
         } else {
-            egui::Color32::TRANSPARENT
+            (
+                egui::Color32::from_rgb(22, 26, 36),
+                egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(32, 38, 52)),
+            )
         };
 
         ui.horizontal(|ui| {
             ui.add_space(8.0);
             let frame = egui::Frame::NONE
                 .fill(bg_color)
-                .corner_radius(8.0)
-                .inner_margin(egui::Margin::symmetric(8, 8));
+                .stroke(stroke)
+                .corner_radius(10.0)
+                .inner_margin(egui::Margin::symmetric(10, 8));
 
-            frame.show(ui, |ui| {
+            let frame_res = frame.show(ui, |ui| {
                 let avail_w = ui.available_width() - 8.0;
                 ui.set_width(avail_w);
 
                 ui.horizontal(|ui| {
                     // Avatar circle
                     let (rect, _) =
-                        ui.allocate_exact_size(egui::vec2(36.0, 36.0), egui::Sense::hover());
+                        ui.allocate_exact_size(egui::vec2(38.0, 38.0), egui::Sense::hover());
                     ui.painter()
-                        .circle_filled(rect.center(), 18.0, color_for_name(&peer.name));
+                        .circle_filled(rect.center(), 19.0, color_for_name(&peer.name));
                     let initial = display_name
                         .chars()
                         .next()
@@ -877,29 +975,48 @@ impl DropItApp {
                         egui::Color32::WHITE,
                     );
 
+                    // Online/offline dot badge on avatar
+                    let dot_center = rect.right_bottom() - egui::vec2(4.0, 4.0);
+                    let dot_color = if peer.is_online {
+                        egui::Color32::from_rgb(16, 185, 129)
+                    } else {
+                        egui::Color32::from_rgb(107, 114, 128)
+                    };
+                    ui.painter().circle_filled(
+                        dot_center,
+                        4.5,
+                        egui::Color32::from_rgb(15, 17, 23),
+                    );
+                    ui.painter().circle_filled(dot_center, 3.5, dot_color);
+
                     ui.add_space(8.0);
 
-                    // Name + IP
-                    let label_res = ui.vertical(|ui| {
+                    // Name + Status
+                    ui.vertical(|ui| {
                         ui.horizontal(|ui| {
                             ui.label(
                                 egui::RichText::new(&display_name)
-                                    .size(14.0)
+                                    .size(13.5)
                                     .strong()
                                     .color(egui::Color32::WHITE),
                             );
                         });
+                        let status_text = if peer.is_online {
+                            format!("Online • {}", peer.addr)
+                        } else {
+                            format!("Recent • {}", peer.addr)
+                        };
+                        let status_color = if peer.is_online {
+                            egui::Color32::from_rgb(52, 211, 153)
+                        } else {
+                            egui::Color32::from_rgb(156, 163, 175)
+                        };
                         ui.label(
-                            egui::RichText::new(&peer.addr)
+                            egui::RichText::new(status_text)
                                 .size(11.0)
-                                .color(egui::Color32::from_rgb(156, 163, 175)),
+                                .color(status_color),
                         );
                     });
-
-                    // Click peer row to select
-                    if label_res.response.interact(egui::Sense::click()).clicked() {
-                        self.selected_peer_id = Some(peer.id.clone());
-                    }
 
                     // Right side: Star button & Rename button
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -940,6 +1057,17 @@ impl DropItApp {
                     });
                 });
             });
+
+            if ui
+                .interact(
+                    frame_res.response.rect,
+                    ui.id().with(&peer.id),
+                    egui::Sense::click(),
+                )
+                .clicked()
+            {
+                self.selected_peer_id = Some(peer.id.clone());
+            }
         });
 
         // Inline rename popup if active
@@ -962,38 +1090,71 @@ impl DropItApp {
         let selected_id = match &self.selected_peer_id {
             Some(id) => id.clone(),
             None => {
-                // Empty state when no peer selected
+                // Modern Hero empty state
                 ui.vertical_centered(|ui| {
-                    ui.add_space(ui.available_height() / 3.0);
+                    ui.add_space(ui.available_height() / 4.0);
                     let (rect, _) =
-                        ui.allocate_exact_size(egui::vec2(64.0, 64.0), egui::Sense::hover());
+                        ui.allocate_exact_size(egui::vec2(80.0, 80.0), egui::Sense::hover());
                     ui.painter().circle_filled(
                         rect.center(),
-                        32.0,
-                        egui::Color32::from_rgb(30, 34, 48),
+                        40.0,
+                        egui::Color32::from_rgb(30, 36, 52),
+                    );
+                    ui.painter().circle_stroke(
+                        rect.center(),
+                        40.0,
+                        egui::Stroke::new(1.5_f32, egui::Color32::from_rgb(59, 130, 246)),
                     );
                     ui.painter().text(
                         rect.center(),
                         egui::Align2::CENTER_CENTER,
-                        "💬",
-                        egui::FontId::proportional(28.0),
-                        egui::Color32::WHITE,
+                        "⚡",
+                        egui::FontId::proportional(36.0),
+                        egui::Color32::from_rgb(96, 165, 250),
                     );
-                    ui.add_space(16.0);
+                    ui.add_space(20.0);
                     ui.label(
-                        egui::RichText::new("Select a device on the left")
-                            .size(18.0)
+                        egui::RichText::new("Drop It Local Transfer")
+                            .size(22.0)
                             .strong()
                             .color(egui::Color32::WHITE),
                     );
                     ui.add_space(8.0);
                     ui.label(
                         egui::RichText::new(
-                            "Share files and quick text messages instantly with peer devices on your WiFi",
+                            "Ultra-fast, zero-cloud peer-to-peer file transfer on your local WiFi",
                         )
-                        .size(13.0)
+                        .size(13.5)
                         .color(egui::Color32::from_rgb(156, 163, 175)),
                     );
+                    ui.add_space(24.0);
+
+                    // Helpful Quick Start card
+                    egui::Frame::NONE
+                        .fill(egui::Color32::from_rgb(22, 26, 36))
+                        .stroke(egui::Stroke::new(
+                            1.0_f32,
+                            egui::Color32::from_rgb(34, 40, 56),
+                        ))
+                        .corner_radius(12.0)
+                        .inner_margin(egui::Margin::symmetric(24, 18))
+                        .show(ui, |ui| {
+                            ui.set_max_width(460.0);
+                            ui.label(
+                                egui::RichText::new("💡 Quick Start:")
+                                    .size(13.5)
+                                    .strong()
+                                    .color(egui::Color32::from_rgb(251, 191, 36)),
+                            );
+                            ui.add_space(8.0);
+                            ui.label(
+                                "• Select any device from Online or Recent History in the sidebar",
+                            );
+                            ui.label("• Drag & drop any files or whole folders into Drop It");
+                            ui.label(
+                                "• Right-click any file in Windows Explorer -> 'Send with Drop It'",
+                            );
+                        });
                 });
                 return;
             }
@@ -1018,19 +1179,19 @@ impl DropItApp {
 
         // Top Channel Bar
         egui::Frame::NONE
-            .fill(egui::Color32::from_rgb(20, 23, 33))
+            .fill(egui::Color32::from_rgb(18, 22, 31))
             .stroke(egui::Stroke::new(
                 1.0_f32,
-                egui::Color32::from_rgb(28, 32, 46),
+                egui::Color32::from_rgb(28, 34, 48),
             ))
             .inner_margin(egui::Margin::symmetric(16, 12))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    // Avatar
+                    // Avatar circle with online indicator
                     let (rect, _) =
-                        ui.allocate_exact_size(egui::vec2(36.0, 36.0), egui::Sense::hover());
+                        ui.allocate_exact_size(egui::vec2(38.0, 38.0), egui::Sense::hover());
                     ui.painter()
-                        .circle_filled(rect.center(), 18.0, color_for_name(&peer.name));
+                        .circle_filled(rect.center(), 19.0, color_for_name(&peer.name));
                     let initial = display_name
                         .chars()
                         .next()
@@ -1041,16 +1202,29 @@ impl DropItApp {
                         rect.center(),
                         egui::Align2::CENTER_CENTER,
                         initial,
-                        egui::FontId::proportional(15.0),
+                        egui::FontId::proportional(16.0),
                         egui::Color32::WHITE,
                     );
+
+                    let dot_center = rect.right_bottom() - egui::vec2(4.0, 4.0);
+                    let dot_color = if peer.is_online {
+                        egui::Color32::from_rgb(16, 185, 129)
+                    } else {
+                        egui::Color32::from_rgb(107, 114, 128)
+                    };
+                    ui.painter().circle_filled(
+                        dot_center,
+                        4.5,
+                        egui::Color32::from_rgb(15, 17, 23),
+                    );
+                    ui.painter().circle_filled(dot_center, 3.5, dot_color);
 
                     ui.add_space(10.0);
                     ui.vertical(|ui| {
                         ui.horizontal(|ui| {
                             ui.label(
                                 egui::RichText::new(&display_name)
-                                    .size(16.0)
+                                    .size(15.5)
                                     .strong()
                                     .color(egui::Color32::WHITE),
                             );
@@ -1063,18 +1237,48 @@ impl DropItApp {
                             }
                         });
                         ui.horizontal(|ui| {
+                            let status_text = if peer.is_online {
+                                "🟢 Online"
+                            } else {
+                                "🕒 Offline (Recent)"
+                            };
+                            let status_color = if peer.is_online {
+                                egui::Color32::from_rgb(52, 211, 153)
+                            } else {
+                                egui::Color32::from_rgb(156, 163, 175)
+                            };
                             ui.label(
-                                egui::RichText::new(format!("🔒 TLS 1.3  •  {}", peer.addr))
+                                egui::RichText::new(status_text)
                                     .size(11.0)
-                                    .color(egui::Color32::from_rgb(16, 185, 129)),
+                                    .color(status_color),
+                            );
+                            ui.label(
+                                egui::RichText::new(format!("•  🛡️ TLS 1.3  •  {}", peer.addr))
+                                    .size(11.0)
+                                    .color(egui::Color32::from_rgb(148, 163, 184)),
                             );
                         });
                     });
 
                     // Quick Action Buttons on right
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.add_space(4.0);
                         if ui
-                            .button(egui::RichText::new("📁 Send Folder").size(13.0))
+                            .add(
+                                egui::Button::new(
+                                    egui::RichText::new("📁 Send Folder")
+                                        .size(12.5)
+                                        .color(egui::Color32::WHITE),
+                                )
+                                .fill(egui::Color32::from_rgb(30, 36, 50))
+                                .stroke(egui::Stroke::new(
+                                    1.0_f32,
+                                    egui::Color32::from_rgb(45, 54, 76),
+                                ))
+                                .corner_radius(6.0)
+                                .min_size(egui::vec2(100.0, 30.0)),
+                            )
+                            .on_hover_text("Send entire folder with all contents")
                             .clicked()
                         {
                             if let Some(folder) = rfd::FileDialog::new().pick_folder() {
@@ -1084,11 +1288,18 @@ impl DropItApp {
                         }
 
                         if ui
-                            .button(
-                                egui::RichText::new("📎 Send Files")
-                                    .size(13.0)
-                                    .color(egui::Color32::WHITE),
+                            .add(
+                                egui::Button::new(
+                                    egui::RichText::new("📎 Send Files")
+                                        .size(12.5)
+                                        .strong()
+                                        .color(egui::Color32::WHITE),
+                                )
+                                .fill(egui::Color32::from_rgb(37, 99, 235))
+                                .corner_radius(6.0)
+                                .min_size(egui::vec2(95.0, 30.0)),
                             )
+                            .on_hover_text("Choose files to send")
                             .clicked()
                         {
                             if let Some(files) = rfd::FileDialog::new().pick_files() {
@@ -1256,66 +1467,84 @@ impl DropItApp {
         }
 
         // Bottom Message & File Input Bar
-        ui.separator();
-        ui.horizontal(|ui| {
-            ui.add_space(16.0);
-            if ui
-                .add(
-                    egui::Button::new(egui::RichText::new("📎").size(18.0))
-                        .corner_radius(8.0)
-                        .min_size(egui::vec2(36.0, 36.0)),
-                )
-                .on_hover_text("Choose files to send (or Drag & Drop)")
-                .clicked()
-            {
-                if let Some(files) = rfd::FileDialog::new().pick_files() {
-                    self.send_selected_files(files);
-                }
-            }
+        ui.add_space(6.0);
+        egui::Frame::NONE
+            .fill(egui::Color32::from_rgb(18, 22, 31))
+            .stroke(egui::Stroke::new(
+                1.0_f32,
+                egui::Color32::from_rgb(32, 38, 54),
+            ))
+            .corner_radius(12.0)
+            .inner_margin(egui::Margin::symmetric(10, 6))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                egui::RichText::new("📎")
+                                    .size(17.0)
+                                    .color(egui::Color32::from_rgb(156, 163, 175)),
+                            )
+                            .frame(false)
+                            .min_size(egui::vec2(32.0, 32.0)),
+                        )
+                        .on_hover_text("Choose files to send (or Drag & Drop)")
+                        .clicked()
+                    {
+                        if let Some(files) = rfd::FileDialog::new().pick_files() {
+                            self.send_selected_files(files);
+                        }
+                    }
 
-            if ui
-                .add(
-                    egui::Button::new(egui::RichText::new("📁").size(18.0))
-                        .corner_radius(8.0)
-                        .min_size(egui::vec2(36.0, 36.0)),
-                )
-                .on_hover_text("Choose folder to send")
-                .clicked()
-            {
-                if let Some(folder) = rfd::FileDialog::new().pick_folder() {
-                    let files = collect_paths_recursive(&[folder]);
-                    self.send_selected_files(files);
-                }
-            }
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                egui::RichText::new("📁")
+                                    .size(17.0)
+                                    .color(egui::Color32::from_rgb(156, 163, 175)),
+                            )
+                            .frame(false)
+                            .min_size(egui::vec2(32.0, 32.0)),
+                        )
+                        .on_hover_text("Choose folder to send")
+                        .clicked()
+                    {
+                        if let Some(folder) = rfd::FileDialog::new().pick_folder() {
+                            let files = collect_paths_recursive(&[folder]);
+                            self.send_selected_files(files);
+                        }
+                    }
 
-            let input_w = ui.available_width() - 60.0;
-            let text_edit = ui.add_sized(
-                [input_w, 36.0],
-                egui::TextEdit::singleline(&mut self.text_input)
-                    .hint_text("Type a message or drop files to send...")
-                    .margin(egui::vec2(10.0, 8.0)),
-            );
+                    let input_w = ui.available_width() - 48.0;
+                    let text_edit = ui.add_sized(
+                        [input_w, 32.0],
+                        egui::TextEdit::singleline(&mut self.text_input)
+                            .hint_text("Type a message or drag & drop files here...")
+                            .margin(egui::vec2(8.0, 6.0)),
+                    );
 
-            if text_edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                self.send_current_message();
-            }
+                    if text_edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        self.send_current_message();
+                    }
 
-            if ui
-                .add(
-                    egui::Button::new(
-                        egui::RichText::new("➤")
-                            .size(16.0)
-                            .color(egui::Color32::WHITE),
-                    )
-                    .fill(egui::Color32::from_rgb(79, 70, 229))
-                    .corner_radius(8.0)
-                    .min_size(egui::vec2(40.0, 36.0)),
-                )
-                .clicked()
-            {
-                self.send_current_message();
-            }
-        });
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                egui::RichText::new("➤")
+                                    .size(16.0)
+                                    .color(egui::Color32::WHITE),
+                            )
+                            .fill(egui::Color32::from_rgb(37, 99, 235))
+                            .corner_radius(16.0)
+                            .min_size(egui::vec2(34.0, 32.0)),
+                        )
+                        .on_hover_text("Send message")
+                        .clicked()
+                    {
+                        self.send_current_message();
+                    }
+                });
+            });
     }
 
     fn render_chat_bubble(
@@ -1333,16 +1562,23 @@ impl DropItApp {
         let mut decision_result: Option<(String, bool)> = None;
 
         ui.with_layout(egui::Layout::top_down(align), |ui| {
-            let max_w = 420.0;
+            let max_w = 440.0;
 
-            let bubble_bg = if is_me {
-                egui::Color32::from_rgb(79, 70, 229) // Indigo
+            let (bubble_bg, stroke) = if is_me {
+                (
+                    egui::Color32::from_rgb(37, 99, 235), // Royal electric blue
+                    egui::Stroke::NONE,
+                )
             } else {
-                egui::Color32::from_rgb(30, 34, 48) // Dark Slate
+                (
+                    egui::Color32::from_rgb(22, 26, 36), // Slate dark
+                    egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(34, 42, 60)),
+                )
             };
 
             egui::Frame::NONE
                 .fill(bubble_bg)
+                .stroke(stroke)
                 .corner_radius(12.0)
                 .inner_margin(egui::Margin::symmetric(14, 10))
                 .show(ui, |ui| {
@@ -1350,18 +1586,34 @@ impl DropItApp {
 
                     match &msg.kind {
                         ChatMessageKind::Text(text) => {
+                            if !is_me {
+                                ui.label(
+                                    egui::RichText::new(&msg.sender_name)
+                                        .size(11.0)
+                                        .strong()
+                                        .color(color_for_name(&msg.sender_name)),
+                                );
+                                ui.add_space(2.0);
+                            }
                             ui.label(
                                 egui::RichText::new(text)
                                     .size(14.0)
                                     .color(egui::Color32::WHITE),
                             );
-                            ui.add_space(2.0);
+                            ui.add_space(3.0);
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
-                                ui.label(
-                                    egui::RichText::new(&msg.time_str)
-                                        .size(10.0)
-                                        .color(egui::Color32::from_rgb(209, 213, 219)),
-                                );
+                                let time_text = if is_me {
+                                    format!("{} ✓✓", msg.time_str)
+                                } else {
+                                    msg.time_str.clone()
+                                };
+                                ui.label(egui::RichText::new(time_text).size(10.0).color(
+                                    if is_me {
+                                        egui::Color32::from_rgb(191, 219, 254)
+                                    } else {
+                                        egui::Color32::from_rgb(156, 163, 175)
+                                    },
+                                ));
                             });
                         }
 
@@ -1381,6 +1633,12 @@ impl DropItApp {
                                 .map(|f| f.filename.clone())
                                 .unwrap_or_else(|| "Files".into());
 
+                            let icon = if file_count > 1 {
+                                "📁"
+                            } else {
+                                get_file_type_icon(&first_name)
+                            };
+
                             let title = if file_count > 1 {
                                 format!("{} (+{} more files)", first_name, file_count - 1)
                             } else {
@@ -1388,7 +1646,8 @@ impl DropItApp {
                             };
 
                             ui.horizontal(|ui| {
-                                ui.label(egui::RichText::new("📄").size(24.0));
+                                ui.label(egui::RichText::new(icon).size(26.0));
+                                ui.add_space(4.0);
                                 ui.vertical(|ui| {
                                     ui.label(
                                         egui::RichText::new(&title)
@@ -1398,13 +1657,17 @@ impl DropItApp {
                                     );
                                     ui.label(
                                         egui::RichText::new(format_bytes(*total_bytes))
-                                            .size(11.0)
-                                            .color(egui::Color32::from_rgb(209, 213, 219)),
+                                            .size(11.5)
+                                            .color(if is_me {
+                                                egui::Color32::from_rgb(191, 219, 254)
+                                            } else {
+                                                egui::Color32::from_rgb(156, 163, 175)
+                                            }),
                                     );
                                 });
                             });
 
-                            ui.add_space(6.0);
+                            ui.add_space(8.0);
 
                             match status {
                                 FileTransferStatus::WaitingForAccept => {
@@ -1422,16 +1685,24 @@ impl DropItApp {
 
                                 FileTransferStatus::PendingOffer => {
                                     ui.label(
-                                        egui::RichText::new("Incoming Transfer Offer")
-                                            .size(12.0)
+                                        egui::RichText::new("Incoming File Transfer Request")
+                                            .size(12.5)
+                                            .strong()
                                             .color(egui::Color32::from_rgb(251, 191, 36)),
                                     );
-                                    ui.add_space(4.0);
+                                    ui.add_space(6.0);
                                     ui.horizontal(|ui| {
                                         if ui
-                                            .button(
-                                                egui::RichText::new("Accept ✅")
-                                                    .color(egui::Color32::WHITE),
+                                            .add(
+                                                egui::Button::new(
+                                                    egui::RichText::new("Accept ✅")
+                                                        .size(12.5)
+                                                        .strong()
+                                                        .color(egui::Color32::WHITE),
+                                                )
+                                                .fill(egui::Color32::from_rgb(16, 185, 129))
+                                                .corner_radius(6.0)
+                                                .min_size(egui::vec2(90.0, 28.0)),
                                             )
                                             .clicked()
                                         {
@@ -1439,9 +1710,21 @@ impl DropItApp {
                                         }
 
                                         if ui
-                                            .button(
-                                                egui::RichText::new("Decline ❌")
-                                                    .color(egui::Color32::from_rgb(239, 68, 68)),
+                                            .add(
+                                                egui::Button::new(
+                                                    egui::RichText::new("Decline ❌")
+                                                        .size(12.5)
+                                                        .color(egui::Color32::from_rgb(
+                                                            248, 113, 113,
+                                                        )),
+                                                )
+                                                .fill(egui::Color32::from_rgb(45, 25, 30))
+                                                .stroke(egui::Stroke::new(
+                                                    1.0_f32,
+                                                    egui::Color32::from_rgb(159, 18, 57),
+                                                ))
+                                                .corner_radius(6.0)
+                                                .min_size(egui::vec2(90.0, 28.0)),
                                             )
                                             .clicked()
                                         {
@@ -1456,30 +1739,67 @@ impl DropItApp {
                                             .show_percentage()
                                             .animate(true),
                                     );
-                                    ui.label(
-                                        egui::RichText::new(format!("{:.1} MB/s", speed_mb_s))
-                                            .size(11.0)
-                                            .color(egui::Color32::from_rgb(16, 185, 129)),
-                                    );
+                                    ui.add_space(2.0);
+                                    ui.horizontal(|ui| {
+                                        ui.label(
+                                            egui::RichText::new(format!(
+                                                "⚡ {:.1} MB/s",
+                                                speed_mb_s
+                                            ))
+                                            .size(11.5)
+                                            .strong()
+                                            .color(egui::Color32::from_rgb(52, 211, 153)),
+                                        );
+                                        ui.with_layout(
+                                            egui::Layout::right_to_left(egui::Align::Center),
+                                            |ui| {
+                                                ui.label(
+                                                    egui::RichText::new(format!(
+                                                        "{:.0}%",
+                                                        progress * 100.0
+                                                    ))
+                                                    .size(11.0)
+                                                    .color(egui::Color32::from_rgb(209, 213, 219)),
+                                                );
+                                            },
+                                        );
+                                    });
                                 }
 
                                 FileTransferStatus::Completed => {
                                     ui.horizontal(|ui| {
                                         ui.label(
-                                            egui::RichText::new("Completed  •  Blake3 Verified ✅")
-                                                .size(11.0)
-                                                .color(egui::Color32::from_rgb(16, 185, 129)),
+                                            egui::RichText::new(
+                                                "Transfer Completed  •  Blake3 Verified ✅",
+                                            )
+                                            .size(11.5)
+                                            .strong()
+                                            .color(egui::Color32::from_rgb(52, 211, 153)),
                                         );
                                     });
                                     if let Some(path) = local_path {
                                         ui.add_space(4.0);
                                         ui.horizontal(|ui| {
                                             let path_open = path.clone();
-                                            if ui.button("Open File").clicked() {
+                                            if ui
+                                                .add(
+                                                    egui::Button::new("📂 Open File")
+                                                        .corner_radius(6.0)
+                                                        .fill(egui::Color32::from_rgb(37, 45, 64)),
+                                                )
+                                                .clicked()
+                                            {
                                                 platform::open_file(&path_open);
                                             }
                                             let path_folder = path.clone();
-                                            if ui.button("Open in Folder").clicked() {
+                                            if ui
+                                                .add(
+                                                    egui::Button::new("📁 Open in Folder")
+                                                        .corner_radius(6.0)
+                                                        .fill(egui::Color32::from_rgb(37, 45, 64)),
+                                                )
+                                                .clicked()
+                                            {
                                                 platform::open_in_folder(&path_folder);
                                             }
                                         });
@@ -1489,27 +1809,29 @@ impl DropItApp {
                                 FileTransferStatus::Declined => {
                                     ui.label(
                                         egui::RichText::new("Transfer Declined ❌")
-                                            .size(11.0)
+                                            .size(11.5)
                                             .color(egui::Color32::from_rgb(239, 68, 68)),
                                     );
                                 }
 
                                 FileTransferStatus::Failed(err) => {
                                     ui.label(
-                                        egui::RichText::new(format!("Failed: {}", err))
-                                            .size(11.0)
+                                        egui::RichText::new(format!("Transfer Failed: {err}"))
+                                            .size(11.5)
                                             .color(egui::Color32::from_rgb(239, 68, 68)),
                                     );
                                 }
                             }
 
-                            ui.add_space(2.0);
+                            ui.add_space(4.0);
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
-                                ui.label(
-                                    egui::RichText::new(&msg.time_str)
-                                        .size(10.0)
-                                        .color(egui::Color32::from_rgb(209, 213, 219)),
-                                );
+                                ui.label(egui::RichText::new(&msg.time_str).size(10.0).color(
+                                    if is_me {
+                                        egui::Color32::from_rgb(191, 219, 254)
+                                    } else {
+                                        egui::Color32::from_rgb(156, 163, 175)
+                                    },
+                                ));
                             });
                         }
                     }
@@ -1683,20 +2005,21 @@ pub async fn run_gui_app(
     tokio::spawn(async move {
         while let Ok(event) = peer_rx.recv().await {
             match event {
-                PeerEvent::Added(p) => {
+                PeerEvent::Added(p) | PeerEvent::Updated(p) => {
                     let _ = tx_peers.send(GuiEvent::PeerAdded(GuiPeer {
                         id: p.announcement.device_id,
                         name: p.announcement.name,
                         addr: p.address.to_string(),
+                        port: p.announcement.port,
                         fingerprint: p.announcement.fingerprint,
                         version: p.announcement.version,
                         last_seen: Instant::now(),
+                        is_online: true,
                     }));
                 }
                 PeerEvent::Removed(id) => {
                     let _ = tx_peers.send(GuiEvent::PeerRemoved(id));
                 }
-                _ => {}
             }
         }
     });
@@ -1786,7 +2109,14 @@ pub async fn run_gui_app(
                 GuiAction::SendMessage { target_addr, text } => {
                     let cfg = cfg_ref.read().await;
                     let _ = client
-                        .send_quick_message(&target_addr, &cfg.device_id, &cfg.device_name, &text)
+                        .send_quick_message(
+                            &target_addr,
+                            &cfg.device_id,
+                            &cfg.device_name,
+                            cfg.port,
+                            &id_ref.fingerprint,
+                            &text,
+                        )
                         .await;
                 }
                 GuiAction::SendFiles {
@@ -1802,6 +2132,7 @@ pub async fn run_gui_app(
                     let cfg_guard = cfg_ref.read().await;
                     let dev_name = cfg_guard.device_name.clone();
                     let dev_id = cfg_guard.device_id.clone();
+                    let dev_port = cfg_guard.port;
                     let fp = id_ref.fingerprint.clone();
                     let tx_fb = tx_action_feedback.clone();
                     drop(cfg_guard);
@@ -1813,6 +2144,7 @@ pub async fn run_gui_app(
                             sender_device_id: dev_id,
                             sender_fingerprint: fp,
                             files: files.clone(),
+                            sender_port: dev_port,
                         };
 
                         match client_clone.send_offer(&target_addr, &offer_req).await {

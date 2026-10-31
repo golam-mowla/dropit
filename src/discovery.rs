@@ -13,7 +13,7 @@ use tracing::{debug, error, info, warn};
 pub const MULTICAST_IPV4: Ipv4Addr = Ipv4Addr::new(239, 255, 53, 42);
 pub const DISCOVERY_PORT: u16 = 53421;
 pub const BEACON_INTERVAL: Duration = Duration::from_secs(2);
-pub const PEER_EXPIRY_DURATION: Duration = Duration::from_secs(6);
+pub const PEER_EXPIRY_DURATION: Duration = Duration::from_secs(30);
 pub const MDNS_SERVICE_TYPE: &str = "_dropit._tcp.local.";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -29,6 +29,7 @@ pub struct DeviceAnnouncement {
 pub enum DiscoverySource {
     Multicast,
     Mdns,
+    Direct,
 }
 
 #[derive(Debug, Clone)]
@@ -63,6 +64,7 @@ impl DiscoveredPeer {
             source: match self.source {
                 DiscoverySource::Multicast => "multicast".to_string(),
                 DiscoverySource::Mdns => "mdns".to_string(),
+                DiscoverySource::Direct => "direct".to_string(),
             },
             last_seen_secs_ago: self.last_seen.elapsed().as_secs(),
         }
