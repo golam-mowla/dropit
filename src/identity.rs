@@ -155,7 +155,7 @@ mod tests {
         let mut id = AnonymousIdentity::new();
         assert!(id.verify_privacy_compliance());
 
-        let old_alias = id.alias.clone();
+        let _old_alias = id.alias.clone();
         // Regenerate alias multiple times to verify valid formats
         for _ in 0..10 {
             id.regenerate_alias();

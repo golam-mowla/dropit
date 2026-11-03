@@ -408,7 +408,7 @@ fn test_anonymity_guarantees_and_privacy_compliance() {
     assert_eq!(words.len(), 2);
 
     // Verify alias regeneration
-    let prev_alias = id.alias.clone();
+    let _prev_alias = id.alias.clone();
     id.regenerate_alias();
     assert!(id.verify_privacy_compliance());
 
