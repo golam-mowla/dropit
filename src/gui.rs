@@ -239,7 +239,9 @@ impl DropItApp {
         let address: SocketAddr = format!("0.0.0.0:{}", app.settings.port).parse()?;
         let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
         runtime.spawn(async move {
-            if let Err(error) = crate::server::run_server(address, server_state, &tls_identity, shutdown_rx).await {
+            if let Err(error) =
+                crate::server::run_server(address, server_state, &tls_identity, shutdown_rx).await
+            {
                 tracing::error!("GUI receiver stopped: {error}");
             }
         });
@@ -273,9 +275,10 @@ impl DropItApp {
                 .entry(peer_id.clone())
                 .or_default()
                 .push(msg.clone());
-            if let (Some(runtime), Some(client)) =
-                (&self.network_runtime, self.peer_clients.get(peer_id).cloned())
-            {
+            if let (Some(runtime), Some(client)) = (
+                &self.network_runtime,
+                self.peer_clients.get(peer_id).cloned(),
+            ) {
                 let event_tx = self.network_events_tx.clone();
                 runtime.spawn(async move {
                     if let Err(error) = client.send_chat_message(&msg).await {
