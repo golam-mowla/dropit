@@ -697,12 +697,17 @@ mod tests {
         let fp_init = "cert-fingerprint-initiator";
         let fp_resp = "cert-fingerprint-responder";
 
-        let (initiator, _init_msg) = Spake2Initiator::start(code_correct, fp_init);
-        let (_responder, resp_msg) = Spake2Responder::start(code_wrong, fp_resp);
+        let (initiator, init_msg) = Spake2Initiator::start(code_correct, fp_init);
+        let (responder, resp_msg) = Spake2Responder::start(code_wrong, fp_resp);
 
-        // Initiator finishing with responder's msg derived from different code must fail
-        let result = initiator.finish(&resp_msg, fp_resp);
-        assert!(result.is_err());
+        // Deriving keys with different passwords produces non-matching keys
+        let mut cipher_init = initiator.finish(&resp_msg, fp_resp).unwrap();
+        let mut cipher_resp = responder.finish(&init_msg, fp_init).unwrap();
+
+        // Any attempt to decrypt traffic encrypted under wrong password key fails
+        let payload = b"Sensitive message";
+        let encrypted = cipher_init.encrypt(payload).unwrap();
+        assert!(cipher_resp.decrypt(&encrypted).is_err());
     }
 
     #[test]
