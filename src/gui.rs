@@ -273,8 +273,7 @@ impl eframe::App for DropItApp {
             .exact_width(210.0)
             .resizable(false)
             .frame(
-                egui::Frame::none()
-                    .fill(egui::Color32::from_rgba_premultiplied(255, 255, 255, 28)),
+                egui::Frame::none().fill(egui::Color32::from_rgba_premultiplied(255, 255, 255, 28)),
             )
             .show(ctx, |ui| {
                 ui.add_space(12.0);
@@ -310,8 +309,7 @@ impl eframe::App for DropItApp {
                 ui.add_space(8.0);
                 ui.add_sized(
                     [ui.available_width(), 30.0],
-                    egui::TextEdit::singleline(&mut self.search_query)
-                        .hint_text("⌕  Search chats"),
+                    egui::TextEdit::singleline(&mut self.search_query).hint_text("⌕  Search chats"),
                 );
                 ui.add_space(8.0);
 
@@ -364,23 +362,22 @@ impl eframe::App for DropItApp {
         // 3. Central Panel (Conversation View / Active Tab)
         egui::CentralPanel::default()
             .frame(
-                egui::Frame::none()
-                    .fill(egui::Color32::from_rgba_premultiplied(255, 255, 255, 20)),
+                egui::Frame::none().fill(egui::Color32::from_rgba_premultiplied(255, 255, 255, 20)),
             )
             .show(ctx, |ui| match self.active_tab {
-            ActiveTab::Chats => {
-                self.render_chat_view(ui);
-            }
-            ActiveTab::Files => {
-                self.render_files_view(ui);
-            }
-            ActiveTab::Nearby => {
-                self.render_nearby_view(ui);
-            }
-            ActiveTab::Settings => {
-                self.render_settings_view(ui);
-            }
-        });
+                ActiveTab::Chats => {
+                    self.render_chat_view(ui);
+                }
+                ActiveTab::Files => {
+                    self.render_files_view(ui);
+                }
+                ActiveTab::Nearby => {
+                    self.render_nearby_view(ui);
+                }
+                ActiveTab::Settings => {
+                    self.render_settings_view(ui);
+                }
+            });
     }
 }
 
@@ -398,11 +395,9 @@ impl DropItApp {
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 ui.label(
-                    egui::RichText::new("SF")
-                        .size(12.0)
-                        .background_color(egui::Color32::from_rgba_premultiplied(
-                            34, 211, 238, 120,
-                        )),
+                    egui::RichText::new("SF").size(12.0).background_color(
+                        egui::Color32::from_rgba_premultiplied(34, 211, 238, 120),
+                    ),
                 );
                 ui.vertical(|ui| {
                     ui.label(egui::RichText::new(&peer_alias).strong().size(15.0));
@@ -470,10 +465,10 @@ impl DropItApp {
                                                         egui::RichText::new(filename)
                                                             .strong()
                                                             .color(if is_mine {
-                                                            egui::Color32::from_rgb(55, 48, 163)
-                                                        } else {
-                                                            self.theme.text_primary
-                                                        }),
+                                                                egui::Color32::from_rgb(55, 48, 163)
+                                                            } else {
+                                                                self.theme.text_primary
+                                                            }),
                                                     );
                                                     ui.label(
                                                         egui::RichText::new(format!(
@@ -507,7 +502,10 @@ impl DropItApp {
             // Bottom input bar
             ui.separator();
             ui.horizontal(|ui| {
-                ui.add_sized([34.0, 34.0], egui::Button::new("📎").fill(self.theme.card_bg));
+                ui.add_sized(
+                    [34.0, 34.0],
+                    egui::Button::new("📎").fill(self.theme.card_bg),
+                );
                 let response = ui.add_sized(
                     [ui.available_width() - 88.0, 34.0],
                     egui::TextEdit::singleline(&mut self.message_input)
@@ -554,7 +552,11 @@ impl DropItApp {
                 .show(&mut columns[0], |ui| {
                     ui.label(egui::RichText::new("Your code").strong().size(14.0));
                     ui.add_space(8.0);
-                    ui.label(egui::RichText::new(&self.pairing_code).monospace().size(22.0));
+                    ui.label(
+                        egui::RichText::new(&self.pairing_code)
+                            .monospace()
+                            .size(22.0),
+                    );
                     ui.add_space(10.0);
                     ui.horizontal(|ui| {
                         if ui.button("New code").clicked() {
@@ -574,7 +576,11 @@ impl DropItApp {
                 .rounding(egui::Rounding::same(12))
                 .inner_margin(14.0)
                 .show(&mut columns[1], |ui| {
-                    ui.label(egui::RichText::new("Connect with a code").strong().size(14.0));
+                    ui.label(
+                        egui::RichText::new("Connect with a code")
+                            .strong()
+                            .size(14.0),
+                    );
                     ui.add_space(8.0);
                     ui.add(
                         egui::TextEdit::singleline(&mut self.pairing_code_input)

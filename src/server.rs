@@ -338,7 +338,11 @@ async fn chat_send_handler(
         )
             .into_response();
     }
-    Json(ChatSendResponse { status: "delivered".to_string(), id }).into_response()
+    Json(ChatSendResponse {
+        status: "delivered".to_string(),
+        id,
+    })
+    .into_response()
 }
 
 async fn chat_get_handler(
