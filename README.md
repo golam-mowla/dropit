@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo.png" alt="Drop It" width="128" height="128" />
+</p>
+
 # Drop It
 
 Fast, lightweight, secure local WiFi file transfer tool and anonymous end-to-end encrypted messenger for Windows (10/11 x64).

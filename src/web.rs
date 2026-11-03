@@ -5,6 +5,7 @@ pub const INDEX_HTML: &str = r#"<!DOCTYPE html>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Drop It - Fast LAN Transfer</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 256 256'%3E%3Cdefs%3E%3ClinearGradient id='bg' x1='0%25' y1='0%25' x2='100%25' y2='100%25'%3E%3Cstop offset='0%25' stop-color='%234F46E5'/%3E%3Cstop offset='50%25' stop-color='%23A855F7'/%3E%3Cstop offset='100%25' stop-color='%23EC4899'/%3E%3C/linearGradient%3E%3Cmask id='m'%3E%3Crect width='256' height='256' fill='white'/%3E%3Cpath d='M128 176 L96 138 H118 V104 H138 V138 H160 Z' fill='black'/%3E%3C/mask%3E%3C/defs%3E%3Crect x='8' y='8' width='240' height='240' rx='54' ry='54' fill='url(%23bg)'/%3E%3Cpath d='M128 46 C128 46 72 118 72 160 C72 191 97 216 128 216 C159 216 184 191 184 160 C184 118 128 46 128 46 Z' fill='%23FFFFFF' mask='url(%23m)'/%3E%3C/svg%3E">
     <style>
         :root {
             --primary: #4f46e5;

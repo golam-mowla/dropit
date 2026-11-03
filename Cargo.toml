@@ -61,3 +61,6 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 eframe = { version = "0.30", default-features = false, features = ["default_fonts", "glow"] }
 [dev-dependencies]
 tempfile = "3"
+
+[build-dependencies]
+winres = "0.1"
