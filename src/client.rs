@@ -62,6 +62,39 @@ impl DropItClient {
         Ok(token_resp.token)
     }
 
+    /// Pairs using an N-word-word code and returns session token and server fingerprint.
+    pub async fn pair_with_code(
+        &self,
+        code: &str,
+        client_id: &str,
+        client_fingerprint: &str,
+    ) -> Result<crate::server::PairingCodeResponse> {
+        let url = format!("{}/api/pairing/code", self.base_url);
+        let req = crate::server::PairingCodeRequest {
+            code: code.to_string(),
+            client_id: client_id.to_string(),
+            client_fingerprint: client_fingerprint.to_string(),
+        };
+
+        let resp = self
+            .client
+            .post(&url)
+            .json(&req)
+            .send()
+            .await
+            .context("Failed to send pairing code")?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            bail!("Pairing failed ({}): {}", status, body);
+        }
+
+        resp.json::<crate::server::PairingCodeResponse>()
+            .await
+            .context("Failed to parse pairing response")
+    }
+
     /// Sends files to receiver and optionally verifies Blake3 hashes.
     pub async fn send_files<P: AsRef<Path>>(
         &self,

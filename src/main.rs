@@ -46,6 +46,9 @@ async fn main() -> Result<()> {
             );
 
             let token_store = SessionTokenStore::new();
+            let pairing_code = token_store.pairing_session().generate_code();
+            info!("Pairing code: {} (valid for 5 minutes)", pairing_code);
+
             let device_id = format!("{:016x}", rand::random::<u64>());
             let device_name = "Swift Falcon".to_string();
 
@@ -56,6 +59,7 @@ async fn main() -> Result<()> {
                 token_store,
                 cert_fingerprint: tls_identity.fingerprint.clone(),
                 auto_accept: receive_args.auto_accept,
+                trust_store: dropit::pairing::DeviceTrustStore::new(),
             };
 
             let announcement = DeviceAnnouncement {

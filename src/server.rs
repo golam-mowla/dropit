@@ -1,4 +1,4 @@
-use crate::pairing::SessionTokenStore;
+use crate::pairing::{DeviceTrustStore, PairingError, SessionTokenStore, TrustStatus};
 use crate::sanitize::safe_destination_path;
 use crate::tls::TlsIdentity;
 use anyhow::{Context, Result};
@@ -10,6 +10,7 @@ use axum::{
     routing::{get, post},
 };
 use serde::{Deserialize, Serialize};
+use std::net::{IpAddr, Ipv4Addr};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
@@ -23,6 +24,7 @@ pub struct ServerState {
     pub token_store: SessionTokenStore,
     pub cert_fingerprint: String,
     pub auto_accept: bool,
+    pub trust_store: DeviceTrustStore,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -35,6 +37,19 @@ pub struct DeviceInfoResponse {
 #[derive(Serialize, Deserialize)]
 pub struct TokenResponse {
     pub token: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct PairingCodeRequest {
+    pub code: String,
+    pub client_id: String,
+    pub client_fingerprint: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct PairingCodeResponse {
+    pub token: String,
+    pub server_fingerprint: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -54,12 +69,13 @@ pub fn create_router(state: ServerState) -> Router {
         .route("/health", get(health_handler))
         .route("/api/info", get(info_handler))
         .route("/api/token", post(token_handler))
+        .route("/api/pairing/code", post(pairing_code_handler))
         .route("/api/transfer", post(transfer_handler))
         .with_state(Arc::new(state))
 }
 
-async fn health_handler() -> impl IntoResponse {
-    (StatusCode::OK, "OK")
+async fn health_handler() -> &'static str {
+    "OK"
 }
 
 async fn info_handler(State(state): State<Arc<ServerState>>) -> impl IntoResponse {
@@ -73,6 +89,54 @@ async fn info_handler(State(state): State<Arc<ServerState>>) -> impl IntoRespons
 async fn token_handler(State(state): State<Arc<ServerState>>) -> impl IntoResponse {
     let token = state.token_store.generate_token();
     Json(TokenResponse { token })
+}
+
+async fn pairing_code_handler(
+    State(state): State<Arc<ServerState>>,
+    headers: HeaderMap,
+    Json(payload): Json<PairingCodeRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let client_ip = headers
+        .get("x-forwarded-for")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.split(',').next())
+        .and_then(|s| s.trim().parse::<IpAddr>().ok())
+        .unwrap_or(IpAddr::V4(Ipv4Addr::LOCALHOST));
+
+    // 1. Verify pairing code with IP rate limiting and 3 strikes lockout
+    let pairing_store = state.token_store.pairing_session();
+    pairing_store
+        .verify_code(&payload.code, client_ip)
+        .map_err(|e| match e {
+            PairingError::RateLimited => (StatusCode::TOO_MANY_REQUESTS, e.to_string()),
+            PairingError::LockedOut => (StatusCode::LOCKED, e.to_string()),
+            PairingError::InvalidCode { .. } => (StatusCode::UNAUTHORIZED, e.to_string()),
+            PairingError::ExpiredOrNotFound => (StatusCode::NOT_FOUND, e.to_string()),
+        })?;
+
+    // 2. TOFU certificate pinning check
+    match state
+        .trust_store
+        .verify_or_pin(&payload.client_id, &payload.client_fingerprint)
+    {
+        TrustStatus::Trusted | TrustStatus::NewDevicePinned => {}
+        TrustStatus::FingerprintMismatch { expected, actual } => {
+            return Err((
+                StatusCode::FORBIDDEN,
+                format!(
+                    "Certificate fingerprint mismatch: expected {}, got {}",
+                    expected, actual
+                ),
+            ));
+        }
+    }
+
+    // 3. Issue single-use session token
+    let token = state.token_store.generate_token();
+    Ok(Json(PairingCodeResponse {
+        token,
+        server_fingerprint: state.cert_fingerprint.clone(),
+    }))
 }
 
 async fn transfer_handler(
@@ -96,6 +160,11 @@ async fn transfer_handler(
             StatusCode::FORBIDDEN,
             "Invalid or expired session token".to_string(),
         ));
+    }
+
+    // Verify initial disk space
+    if let Err(e) = crate::pairing::verify_disk_space(&state.download_dir, 1024) {
+        return Err((StatusCode::INSUFFICIENT_STORAGE, e.to_string()));
     }
 
     tokio::fs::create_dir_all(&state.download_dir)
@@ -133,6 +202,13 @@ async fn transfer_handler(
         let mut total_bytes = 0u64;
 
         while let Ok(Some(chunk)) = field.chunk().await {
+            // Verify disk space before writing chunk
+            if let Err(e) =
+                crate::pairing::verify_disk_space(&state.download_dir, chunk.len() as u64)
+            {
+                return Err((StatusCode::INSUFFICIENT_STORAGE, e.to_string()));
+            }
+
             total_bytes += chunk.len() as u64;
             hasher.update(&chunk);
             file.write_all(&chunk).await.map_err(|e| {
