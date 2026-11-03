@@ -37,16 +37,10 @@ impl AppSettings {
 
     /// Loads settings from disk or returns defaults if not present or corrupt.
     pub fn load() -> Self {
-        if let Some(path) = Self::settings_path() {
-            if path.exists() {
-                if let Ok(content) = fs::read_to_string(&path) {
-                    if let Ok(settings) = serde_json::from_str::<AppSettings>(&content) {
-                        return settings;
-                    }
-                }
-            }
-        }
-        Self::default()
+        let loaded = Self::settings_path()
+            .and_then(|p| fs::read_to_string(p).ok())
+            .and_then(|c| serde_json::from_str::<AppSettings>(&c).ok());
+        loaded.unwrap_or_default()
     }
 
     /// Saves settings to disk atomically.

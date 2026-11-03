@@ -352,13 +352,13 @@ async fn transfer_handler(
 
     while let Ok(Some(mut field)) = multipart.next_field().await {
         // Check for cancellation before processing each file
-        if let Some(ref sid) = session_id {
-            if state.cancelled_sessions.read().unwrap().contains(sid) {
-                return Err((
-                    StatusCode::GONE,
-                    "Transfer cancelled by sender or receiver".to_string(),
-                ));
-            }
+        if let Some(ref sid) = session_id
+            && state.cancelled_sessions.read().unwrap().contains(sid)
+        {
+            return Err((
+                StatusCode::GONE,
+                "Transfer cancelled by sender or receiver".to_string(),
+            ));
         }
 
         let raw_filename = field
@@ -385,15 +385,15 @@ async fn transfer_handler(
 
         while let Ok(Some(chunk)) = field.chunk().await {
             // Check cancellation mid-stream
-            if let Some(ref sid) = session_id {
-                if state.cancelled_sessions.read().unwrap().contains(sid) {
-                    drop(file);
-                    let _ = tokio::fs::remove_file(&target_path).await;
-                    return Err((
-                        StatusCode::GONE,
-                        "Transfer cancelled mid-stream".to_string(),
-                    ));
-                }
+            if let Some(ref sid) = session_id
+                && state.cancelled_sessions.read().unwrap().contains(sid)
+            {
+                drop(file);
+                let _ = tokio::fs::remove_file(&target_path).await;
+                return Err((
+                    StatusCode::GONE,
+                    "Transfer cancelled mid-stream".to_string(),
+                ));
             }
 
             // Verify disk space before writing chunk

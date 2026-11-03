@@ -308,10 +308,10 @@ impl DropItClient {
         let mut local_hashes = Vec::new();
 
         for p in file_paths {
-            if let Some(ref cf) = cancel_flag {
-                if cf.load(Ordering::SeqCst) {
-                    bail!("Transfer cancelled before uploading");
-                }
+            if let Some(ref cf) = cancel_flag
+                && cf.load(Ordering::SeqCst)
+            {
+                bail!("Transfer cancelled before uploading");
             }
 
             let path = p.as_ref();
@@ -365,15 +365,14 @@ impl DropItClient {
             for (filename, local_hash) in local_hashes {
                 if let Some(remote_file) =
                     transfer_resp.files.iter().find(|f| f.filename == filename)
+                    && remote_file.blake3_hash != local_hash
                 {
-                    if remote_file.blake3_hash != local_hash {
-                        bail!(
-                            "Hash verification mismatch for '{}': local={}, remote={}",
-                            filename,
-                            local_hash,
-                            remote_file.blake3_hash
-                        );
-                    }
+                    bail!(
+                        "Hash verification mismatch for '{}': local={}, remote={}",
+                        filename,
+                        local_hash,
+                        remote_file.blake3_hash
+                    );
                 }
             }
             info!("All file Blake3 hashes verified successfully against remote receiver");
