@@ -83,15 +83,15 @@ pub struct GlassTheme {
 impl Default for GlassTheme {
     fn default() -> Self {
         Self {
-            bg_dark: egui::Color32::from_rgba_premultiplied(15, 23, 42, 230),
-            card_bg: egui::Color32::from_rgba_premultiplied(30, 41, 59, 170),
-            card_border: egui::Color32::from_rgba_premultiplied(255, 255, 255, 35),
+            bg_dark: egui::Color32::from_rgb(68, 61, 172),
+            card_bg: egui::Color32::from_rgba_premultiplied(255, 255, 255, 38),
+            card_border: egui::Color32::from_rgba_premultiplied(255, 255, 255, 78),
             gradient_indigo: egui::Color32::from_rgb(79, 70, 229),
             gradient_purple: egui::Color32::from_rgb(168, 85, 247),
             gradient_pink: egui::Color32::from_rgb(236, 72, 153),
             accent_green: egui::Color32::from_rgb(34, 197, 94),
             text_primary: egui::Color32::from_rgb(248, 250, 252),
-            text_muted: egui::Color32::from_rgb(148, 163, 184),
+            text_muted: egui::Color32::from_rgba_premultiplied(255, 255, 255, 185),
         }
     }
 }
@@ -150,7 +150,7 @@ impl DropItApp {
         // Sample peer for immediate interactive experience
         let sample_peer = PeerEntry {
             id: "peer-sample-1".to_string(),
-            alias: "Amber Lynx".to_string(),
+            alias: "Swift Falcon".to_string(),
             ip: "192.168.1.120".to_string(),
             port: 53420,
             is_online: true,
@@ -164,7 +164,7 @@ impl DropItApp {
                 "thread-sample",
                 &sample_peer.id,
                 &sample_peer.alias,
-                MessagePayload::Text("Connected over local encrypted channel.".to_string()),
+                MessagePayload::Text("Hey, did the build finish?".to_string()),
             )],
         );
 
@@ -251,87 +251,46 @@ impl eframe::App for DropItApp {
             }
         });
 
-        // 1. Navigation Rail (Leftmost 64px)
-        egui::SidePanel::left("nav_rail")
-            .exact_width(64.0)
-            .resizable(false)
-            .show(ctx, |ui| {
-                ui.vertical_centered(|ui| {
-                    ui.add_space(16.0);
-                    // App Logo Drop indicator
-                    ui.label(egui::RichText::new("💧").size(24.0));
-                    ui.add_space(20.0);
+        // Glass canvas: the visual treatment follows the supplied chat mockup.
+        let canvas = ctx.screen_rect();
+        let backdrop = ctx.layer_painter(egui::LayerId::background());
+        backdrop.rect_filled(canvas, 0.0, self.theme.bg_dark);
+        backdrop.circle_filled(
+            egui::pos2(canvas.right() - 80.0, canvas.top() + 70.0),
+            210.0,
+            egui::Color32::from_rgba_premultiplied(34, 211, 238, 72),
+        );
+        backdrop.circle_filled(
+            egui::pos2(canvas.left() + 180.0, canvas.bottom() - 20.0),
+            190.0,
+            egui::Color32::from_rgba_premultiplied(52, 211, 153, 58),
+        );
 
-                    // Nav tab buttons
-                    if ui
-                        .selectable_label(self.active_tab == ActiveTab::Chats, "💬")
-                        .clicked()
-                    {
-                        self.active_tab = ActiveTab::Chats;
-                    }
-                    ui.add_space(8.0);
-                    if ui
-                        .selectable_label(self.active_tab == ActiveTab::Files, "📁")
-                        .clicked()
-                    {
-                        self.active_tab = ActiveTab::Files;
-                    }
-                    ui.add_space(8.0);
-                    if ui
-                        .selectable_label(self.active_tab == ActiveTab::Nearby, "📡")
-                        .clicked()
-                    {
-                        self.active_tab = ActiveTab::Nearby;
-                    }
-                    ui.add_space(8.0);
-                    if ui
-                        .selectable_label(self.active_tab == ActiveTab::Settings, "⚙")
-                        .clicked()
-                    {
-                        self.active_tab = ActiveTab::Settings;
-                    }
-                });
-            });
-
-        // 2. Sidebar (210px: Devices / Threads list)
+        // Conversation list, tabs and pairing entry point.
         egui::SidePanel::left("devices_sidebar")
             .exact_width(210.0)
             .resizable(false)
+            .frame(egui::Frame::none().fill(egui::Color32::from_rgba_premultiplied(255, 255, 255, 28)))
             .show(ctx, |ui| {
                 ui.add_space(12.0);
-                ui.heading(egui::RichText::new("Drop It").strong());
-
-                // User Identity Card
-                ui.add_space(8.0);
-                egui::Frame::none()
-                    .fill(self.theme.card_bg)
-                    .stroke(egui::Stroke::new(1.0_f32, self.theme.card_border))
-                    .inner_margin(8.0)
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.label(egui::RichText::new("●").color(self.theme.accent_green));
-                            ui.vertical(|ui| {
-                                ui.label(
-                                    egui::RichText::new(&self.identity.alias)
-                                        .strong()
-                                        .size(13.0),
-                                );
-                                ui.label(
-                                    egui::RichText::new(format!("Port: {}", self.settings.port))
-                                        .size(10.0)
-                                        .color(self.theme.text_muted),
-                                );
-                            });
-                        });
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("Drop It").strong().size(18.0));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(egui::RichText::new("●").color(self.theme.accent_green));
                     });
-
-                ui.add_space(12.0);
-                ui.label(
-                    egui::RichText::new("PEERS")
-                        .size(10.0)
-                        .strong()
-                        .color(self.theme.text_muted),
-                );
+                });
+                ui.add_space(10.0);
+                ui.horizontal(|ui| {
+                    for (tab, label) in [(ActiveTab::Chats, "Chats"), (ActiveTab::Files, "Files"), (ActiveTab::Nearby, "Nearby")] {
+                        let selected = self.active_tab == tab;
+                        if ui.add_sized([58.0, 28.0], egui::Button::new(label).fill(if selected { egui::Color32::from_rgba_premultiplied(255, 255, 255, 70) } else { egui::Color32::TRANSPARENT })).clicked() {
+                            self.active_tab = tab;
+                        }
+                    }
+                });
+                ui.add_space(8.0);
+                ui.add_sized([ui.available_width(), 30.0], egui::TextEdit::singleline(&mut self.search_query).hint_text("⌕  Search chats"));
+                ui.add_space(8.0);
 
                 // Peer List
                 egui::ScrollArea::vertical().show(ui, |ui| {
@@ -339,36 +298,33 @@ impl eframe::App for DropItApp {
                     for peer in peers {
                         let is_selected = self.selected_peer_id.as_deref() == Some(&peer.id);
                         let bg_color = if is_selected {
-                            self.theme.gradient_indigo
+                            egui::Color32::from_rgba_premultiplied(255, 255, 255, 58)
                         } else {
                             egui::Color32::TRANSPARENT
                         };
 
                         egui::Frame::none()
                             .fill(bg_color)
-                            .inner_margin(6.0)
+                            .inner_margin(8.0)
                             .show(ui, |ui| {
                                 ui.horizontal(|ui| {
-                                    if peer.is_online {
-                                        ui.label(
-                                            egui::RichText::new("●").color(self.theme.accent_green),
-                                        );
-                                    } else {
-                                        ui.label(
-                                            egui::RichText::new("○").color(self.theme.text_muted),
-                                        );
-                                    }
-                                    if ui.button(&peer.alias).clicked() {
+                                    ui.label(egui::RichText::new(peer.alias.chars().take(2).collect::<String>()).size(11.0));
+                                    if ui.button(egui::RichText::new(&peer.alias).strong()).clicked() {
                                         self.selected_peer_id = Some(peer.id.clone());
                                     }
                                 });
                             });
                     }
                 });
+                ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
+                    if ui.add_sized([180.0, 32.0], egui::Button::new("＋  New chat with code").fill(egui::Color32::from_rgba_premultiplied(255,255,255,48))).clicked() {
+                        self.active_tab = ActiveTab::Nearby;
+                    }
+                });
             });
 
         // 3. Central Panel (Conversation View / Active Tab)
-        egui::CentralPanel::default().show(ctx, |ui| match self.active_tab {
+        egui::CentralPanel::default().frame(egui::Frame::none().fill(egui::Color32::from_rgba_premultiplied(255, 255, 255, 20))).show(ctx, |ui| match self.active_tab {
             ActiveTab::Chats => {
                 self.render_chat_view(ui);
             }
@@ -395,39 +351,19 @@ impl DropItApp {
                 .map(|p| p.alias.clone())
                 .unwrap_or_else(|| "Peer".to_string());
 
-            // Header
+            // Header mirrors the supplied encrypted-chat layout.
+            ui.add_space(6.0);
             ui.horizontal(|ui| {
-                ui.heading(egui::RichText::new(&peer_alias).strong());
-                ui.label(
-                    egui::RichText::new("🔒 TLS 1.3 End-to-End Encrypted")
-                        .size(11.0)
-                        .color(self.theme.accent_green),
-                );
+                ui.label(egui::RichText::new("SF").size(12.0).background_color(egui::Color32::from_rgba_premultiplied(34, 211, 238, 120)));
+                ui.vertical(|ui| {
+                    ui.label(egui::RichText::new(&peer_alias).strong().size(15.0));
+                    ui.label(egui::RichText::new("🔒  End-to-end encrypted").size(11.0).color(self.theme.text_muted));
+                });
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(egui::RichText::new("•••   ☎").size(16.0));
+                });
             });
             ui.separator();
-
-            // Drag and drop dropzone card
-            egui::Frame::none()
-                .fill(self.theme.card_bg)
-                .stroke(egui::Stroke::new(1.0_f32, self.theme.gradient_purple))
-                .inner_margin(12.0)
-                .show(ui, |ui| {
-                    ui.vertical_centered(|ui| {
-                        ui.label(
-                            egui::RichText::new("Drop files or folders here")
-                                .strong()
-                                .color(self.theme.gradient_indigo),
-                        );
-                        ui.label(
-                            egui::RichText::new(
-                                "Transferred instantly with Blake3 integrity check",
-                            )
-                            .size(11.0)
-                            .color(self.theme.text_muted),
-                        );
-                    });
-                });
-
             ui.add_space(8.0);
 
             // Message thread
@@ -435,6 +371,10 @@ impl DropItApp {
                 egui::ScrollArea::vertical()
                     .stick_to_bottom(true)
                     .show(ui, |ui| {
+                        ui.vertical_centered(|ui| {
+                            ui.label(egui::RichText::new("Connected with code 7-amber-falcon").size(11.0).color(self.theme.text_muted));
+                        });
+                        ui.add_space(12.0);
                         let msgs = self
                             .chat_messages
                             .get(&peer_id)
@@ -443,36 +383,37 @@ impl DropItApp {
                         for msg in msgs {
                             let is_mine = msg.sender_id == self.identity.device_id;
                             let bubble_color = if is_mine {
-                                self.theme.gradient_indigo
+                                egui::Color32::from_rgb(255, 255, 255)
                             } else {
                                 self.theme.card_bg
                             };
 
                             ui.horizontal(|ui| {
                                 if is_mine {
-                                    ui.add_space(60.0);
+                                    ui.add_space(ui.available_width() * 0.25);
                                 }
                                 egui::Frame::none()
                                     .fill(bubble_color)
                                     .stroke(egui::Stroke::new(1.0_f32, self.theme.card_border))
-                                    .inner_margin(8.0)
+                                    .rounding(egui::Rounding::same(14))
+                                    .inner_margin(10.0)
                                     .show(ui, |ui| match &msg.payload {
                                         MessagePayload::Text(text) => {
-                                            ui.label(text);
+                                            ui.label(egui::RichText::new(text).color(if is_mine { egui::Color32::from_rgb(55, 48, 163) } else { self.theme.text_primary }));
                                         }
                                         MessagePayload::FileBubble { filename, size, .. } => {
                                             ui.horizontal(|ui| {
-                                                ui.label("📎");
+                                                ui.label("🗜");
                                                 ui.vertical(|ui| {
                                                     ui.label(
-                                                        egui::RichText::new(filename).strong(),
+                                                        egui::RichText::new(filename).strong().color(if is_mine { egui::Color32::from_rgb(55, 48, 163) } else { self.theme.text_primary }),
                                                     );
                                                     ui.label(
                                                         egui::RichText::new(format!(
                                                             "{:.1} KB",
                                                             *size as f64 / 1024.0
                                                         ))
-                                                        .size(10.0),
+                                                        .size(10.0).color(if is_mine { self.theme.gradient_indigo } else { self.theme.text_muted }),
                                                     );
                                                 });
                                             });
@@ -485,18 +426,21 @@ impl DropItApp {
                     });
             });
 
-            // Bottom Input Bar
+            ui.add_space(4.0);
+            ui.label(egui::RichText::new("⌨  Swift Falcon is typing").size(11.0).color(self.theme.text_muted));
+            // Bottom input bar
             ui.separator();
             ui.horizontal(|ui| {
+                ui.add_sized([34.0, 34.0], egui::Button::new("📎").fill(self.theme.card_bg));
                 let response = ui.add_sized(
-                    [ui.available_width() - 80.0, 32.0],
+                    [ui.available_width() - 88.0, 34.0],
                     egui::TextEdit::singleline(&mut self.message_input)
-                        .hint_text("Type an encrypted message..."),
+                        .hint_text("Write a message"),
                 );
                 if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                     self.send_current_message();
                 }
-                if ui.button("Send").clicked() {
+                if ui.add_sized([36.0, 34.0], egui::Button::new("➤").fill(egui::Color32::WHITE)).clicked() {
                     self.send_current_message();
                 }
             });

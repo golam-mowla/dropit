@@ -9,13 +9,10 @@
       <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.4"/>
       <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.0"/>
     </linearGradient>
-    <mask id="arrowMask">
-      <rect width="256" height="256" fill="white"/>
-      <path d="M128 176 L96 138 H118 V104 H138 V138 H160 Z" fill="black"/>
-    </mask>
   </defs>
   <rect x="8" y="8" width="240" height="240" rx="54" ry="54" fill="url(#bg)"/>
   <rect x="8" y="8" width="240" height="70" rx="54" ry="54" fill="url(#highlight)"/>
   <rect x="9" y="9" width="238" height="238" rx="53" ry="53" fill="none" stroke="#FFFFFF" stroke-opacity="0.35" stroke-width="2"/>
-  <path d="M128 46 C128 46 72 118 72 160 C72 191 97 216 128 216 C159 216 184 191 184 160 C184 118 128 46 128 46 Z" fill="#FFFFFF" mask="url(#arrowMask)"/>
+  <path d="M128 46 C128 46 72 118 72 160 C72 191 97 216 128 216 C159 216 184 191 184 160 C184 118 128 46 128 46 Z" fill="#FFFFFF"/>
+  <path d="M128 116 V166 M104 143 L128 167 L152 143" fill="none" stroke="#7C3AED" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>

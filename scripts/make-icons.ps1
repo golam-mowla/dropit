@@ -85,7 +85,7 @@ public class IconGenerator {
                 }
             }
 
-            // 4. Downward arrow cutout
+            // 4. Downward arrow, matching the app-icon preview.
             float aw = size * 0.18f;
             float stemW = size * 0.08f;
             float stemH = size * 0.11f;
@@ -100,8 +100,13 @@ public class IconGenerator {
                     new PointF(cx, startY + stemH + headH)
                 });
 
-                using (SolidBrush cutoutBrush = new SolidBrush(Color.FromArgb(255, 168, 85, 247))) {
-                    g.FillPath(cutoutBrush, arrowPath);
+                using (Pen arrowPen = new Pen(Color.FromArgb(255, 124, 58, 237), Math.Max(2.0f, size * 0.055f))) {
+                    arrowPen.StartCap = LineCap.Round;
+                    arrowPen.EndCap = LineCap.Round;
+                    arrowPen.LineJoin = LineJoin.Round;
+                    g.DrawLine(arrowPen, new PointF(cx, startY), new PointF(cx, startY + stemH + headH * 0.35f));
+                    g.DrawLine(arrowPen, new PointF(cx - aw / 2, startY + stemH), new PointF(cx, startY + stemH + headH));
+                    g.DrawLine(arrowPen, new PointF(cx, startY + stemH + headH), new PointF(cx + aw / 2, startY + stemH));
                 }
             }
         }
