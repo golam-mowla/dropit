@@ -7,7 +7,7 @@ pub fn sanitize_filename(raw_name: &str) -> String {
     let mut name = raw_name.trim();
 
     // 2. Extract only the last path segment (handles both / and \)
-    if let Some(pos) = name.rfind(|c| c == '/' || c == '\\') {
+    if let Some(pos) = name.rfind(['/', '\\']) {
         name = &name[pos + 1..];
     }
 

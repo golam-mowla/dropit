@@ -69,13 +69,13 @@ pub async fn scan_nearby(timeout_dur: Duration, port: u16) -> Result<Vec<Discove
             res = socket.recv_from(&mut buf) => {
                 match res {
                     Ok((len, addr)) => {
-                        if let Ok(announcement) = DeviceAnnouncement::from_bytes(&buf[..len]) {
-                            if !peers.iter().any(|p: &DiscoveredPeer| p.announcement.device_id == announcement.device_id) {
-                                peers.push(DiscoveredPeer {
-                                    announcement,
-                                    address: addr,
-                                });
-                            }
+                        if let Ok(announcement) = DeviceAnnouncement::from_bytes(&buf[..len])
+                            && !peers.iter().any(|p: &DiscoveredPeer| p.announcement.device_id == announcement.device_id)
+                        {
+                            peers.push(DiscoveredPeer {
+                                announcement,
+                                address: addr,
+                            });
                         }
                     }
                     Err(e) => {
