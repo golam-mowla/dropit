@@ -10,6 +10,8 @@ pub struct AppSettings {
     pub download_dir: PathBuf,
     pub auto_accept: bool,
     pub port: u16,
+    /// Internet relay toggle (reserved for future roadmap; disabled in v1 for local LAN zero-telemetry).
+    pub relay_enabled: bool,
 }
 
 impl Default for AppSettings {
@@ -21,10 +23,11 @@ impl Default for AppSettings {
             });
 
         Self {
-            alias: "Swift Falcon".to_string(),
+            alias: crate::identity::generate_random_alias(),
             download_dir,
             auto_accept: false,
             port: 53420,
+            relay_enabled: false,
         }
     }
 }
@@ -77,6 +80,7 @@ mod tests {
             download_dir: PathBuf::from("/tmp/downloads"),
             auto_accept: true,
             port: 53425,
+            relay_enabled: false,
         };
         let json = serde_json::to_string(&s).unwrap();
         let loaded: AppSettings = serde_json::from_str(&json).unwrap();
