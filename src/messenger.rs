@@ -308,6 +308,7 @@ pub fn dpapi_decrypt(ciphertext: &[u8]) -> Result<Vec<u8>> {
 }
 
 /// Persistent, DPAPI-protected chat history store.
+#[derive(Clone)]
 pub struct ChatHistoryStore {
     base_dir: PathBuf,
 }

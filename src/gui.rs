@@ -129,6 +129,7 @@ pub struct DropItApp {
     pub message_input: String,
     pub search_query: String,
     pub pairing_code_input: String,
+    pub pairing_code: String,
     pub status_message: String,
     pub dropped_files_queue: Vec<PathBuf>,
 }
@@ -179,6 +180,7 @@ impl DropItApp {
             message_input: String::new(),
             search_query: String::new(),
             pairing_code_input: String::new(),
+            pairing_code: crate::pairing::generate_pairing_code(),
             status_message: "Drop It ready (LAN anonymous)".to_string(),
             dropped_files_queue: Vec::new(),
         }
@@ -270,7 +272,10 @@ impl eframe::App for DropItApp {
         egui::SidePanel::left("devices_sidebar")
             .exact_width(210.0)
             .resizable(false)
-            .frame(egui::Frame::none().fill(egui::Color32::from_rgba_premultiplied(255, 255, 255, 28)))
+            .frame(
+                egui::Frame::none()
+                    .fill(egui::Color32::from_rgba_premultiplied(255, 255, 255, 28)),
+            )
             .show(ctx, |ui| {
                 ui.add_space(12.0);
                 ui.horizontal(|ui| {
@@ -281,15 +286,33 @@ impl eframe::App for DropItApp {
                 });
                 ui.add_space(10.0);
                 ui.horizontal(|ui| {
-                    for (tab, label) in [(ActiveTab::Chats, "Chats"), (ActiveTab::Files, "Files"), (ActiveTab::Nearby, "Nearby")] {
+                    for (tab, label) in [
+                        (ActiveTab::Chats, "Chats"),
+                        (ActiveTab::Files, "Files"),
+                        (ActiveTab::Nearby, "Nearby"),
+                    ] {
                         let selected = self.active_tab == tab;
-                        if ui.add_sized([58.0, 28.0], egui::Button::new(label).fill(if selected { egui::Color32::from_rgba_premultiplied(255, 255, 255, 70) } else { egui::Color32::TRANSPARENT })).clicked() {
+                        if ui
+                            .add_sized(
+                                [58.0, 28.0],
+                                egui::Button::new(label).fill(if selected {
+                                    egui::Color32::from_rgba_premultiplied(255, 255, 255, 70)
+                                } else {
+                                    egui::Color32::TRANSPARENT
+                                }),
+                            )
+                            .clicked()
+                        {
                             self.active_tab = tab;
                         }
                     }
                 });
                 ui.add_space(8.0);
-                ui.add_sized([ui.available_width(), 30.0], egui::TextEdit::singleline(&mut self.search_query).hint_text("⌕  Search chats"));
+                ui.add_sized(
+                    [ui.available_width(), 30.0],
+                    egui::TextEdit::singleline(&mut self.search_query)
+                        .hint_text("⌕  Search chats"),
+                );
                 ui.add_space(8.0);
 
                 // Peer List
@@ -308,8 +331,16 @@ impl eframe::App for DropItApp {
                             .inner_margin(8.0)
                             .show(ui, |ui| {
                                 ui.horizontal(|ui| {
-                                    ui.label(egui::RichText::new(peer.alias.chars().take(2).collect::<String>()).size(11.0));
-                                    if ui.button(egui::RichText::new(&peer.alias).strong()).clicked() {
+                                    ui.label(
+                                        egui::RichText::new(
+                                            peer.alias.chars().take(2).collect::<String>(),
+                                        )
+                                        .size(11.0),
+                                    );
+                                    if ui
+                                        .button(egui::RichText::new(&peer.alias).strong())
+                                        .clicked()
+                                    {
                                         self.selected_peer_id = Some(peer.id.clone());
                                     }
                                 });
@@ -317,14 +348,26 @@ impl eframe::App for DropItApp {
                     }
                 });
                 ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
-                    if ui.add_sized([180.0, 32.0], egui::Button::new("＋  New chat with code").fill(egui::Color32::from_rgba_premultiplied(255,255,255,48))).clicked() {
+                    if ui
+                        .add_sized(
+                            [180.0, 32.0],
+                            egui::Button::new("＋  New chat with code")
+                                .fill(egui::Color32::from_rgba_premultiplied(255, 255, 255, 48)),
+                        )
+                        .clicked()
+                    {
                         self.active_tab = ActiveTab::Nearby;
                     }
                 });
             });
 
         // 3. Central Panel (Conversation View / Active Tab)
-        egui::CentralPanel::default().frame(egui::Frame::none().fill(egui::Color32::from_rgba_premultiplied(255, 255, 255, 20))).show(ctx, |ui| match self.active_tab {
+        egui::CentralPanel::default()
+            .frame(
+                egui::Frame::none()
+                    .fill(egui::Color32::from_rgba_premultiplied(255, 255, 255, 20)),
+            )
+            .show(ctx, |ui| match self.active_tab {
             ActiveTab::Chats => {
                 self.render_chat_view(ui);
             }
@@ -354,10 +397,20 @@ impl DropItApp {
             // Header mirrors the supplied encrypted-chat layout.
             ui.add_space(6.0);
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("SF").size(12.0).background_color(egui::Color32::from_rgba_premultiplied(34, 211, 238, 120)));
+                ui.label(
+                    egui::RichText::new("SF")
+                        .size(12.0)
+                        .background_color(egui::Color32::from_rgba_premultiplied(
+                            34, 211, 238, 120,
+                        )),
+                );
                 ui.vertical(|ui| {
                     ui.label(egui::RichText::new(&peer_alias).strong().size(15.0));
-                    ui.label(egui::RichText::new("🔒  End-to-end encrypted").size(11.0).color(self.theme.text_muted));
+                    ui.label(
+                        egui::RichText::new("🔒  End-to-end encrypted")
+                            .size(11.0)
+                            .color(self.theme.text_muted),
+                    );
                 });
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.label(egui::RichText::new("•••   ☎").size(16.0));
@@ -372,7 +425,11 @@ impl DropItApp {
                     .stick_to_bottom(true)
                     .show(ui, |ui| {
                         ui.vertical_centered(|ui| {
-                            ui.label(egui::RichText::new("Connected with code 7-amber-falcon").size(11.0).color(self.theme.text_muted));
+                            ui.label(
+                                egui::RichText::new("Connected with code 7-amber-falcon")
+                                    .size(11.0)
+                                    .color(self.theme.text_muted),
+                            );
                         });
                         ui.add_space(12.0);
                         let msgs = self
@@ -399,21 +456,36 @@ impl DropItApp {
                                     .inner_margin(10.0)
                                     .show(ui, |ui| match &msg.payload {
                                         MessagePayload::Text(text) => {
-                                            ui.label(egui::RichText::new(text).color(if is_mine { egui::Color32::from_rgb(55, 48, 163) } else { self.theme.text_primary }));
+                                            ui.label(egui::RichText::new(text).color(if is_mine {
+                                                egui::Color32::from_rgb(55, 48, 163)
+                                            } else {
+                                                self.theme.text_primary
+                                            }));
                                         }
                                         MessagePayload::FileBubble { filename, size, .. } => {
                                             ui.horizontal(|ui| {
                                                 ui.label("🗜");
                                                 ui.vertical(|ui| {
                                                     ui.label(
-                                                        egui::RichText::new(filename).strong().color(if is_mine { egui::Color32::from_rgb(55, 48, 163) } else { self.theme.text_primary }),
+                                                        egui::RichText::new(filename)
+                                                            .strong()
+                                                            .color(if is_mine {
+                                                            egui::Color32::from_rgb(55, 48, 163)
+                                                        } else {
+                                                            self.theme.text_primary
+                                                        }),
                                                     );
                                                     ui.label(
                                                         egui::RichText::new(format!(
                                                             "{:.1} KB",
                                                             *size as f64 / 1024.0
                                                         ))
-                                                        .size(10.0).color(if is_mine { self.theme.gradient_indigo } else { self.theme.text_muted }),
+                                                        .size(10.0)
+                                                        .color(if is_mine {
+                                                            self.theme.gradient_indigo
+                                                        } else {
+                                                            self.theme.text_muted
+                                                        }),
                                                     );
                                                 });
                                             });
@@ -427,7 +499,11 @@ impl DropItApp {
             });
 
             ui.add_space(4.0);
-            ui.label(egui::RichText::new("⌨  Swift Falcon is typing").size(11.0).color(self.theme.text_muted));
+            ui.label(
+                egui::RichText::new("⌨  Swift Falcon is typing")
+                    .size(11.0)
+                    .color(self.theme.text_muted),
+            );
             // Bottom input bar
             ui.separator();
             ui.horizontal(|ui| {
@@ -440,7 +516,13 @@ impl DropItApp {
                 if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                     self.send_current_message();
                 }
-                if ui.add_sized([36.0, 34.0], egui::Button::new("➤").fill(egui::Color32::WHITE)).clicked() {
+                if ui
+                    .add_sized(
+                        [36.0, 34.0],
+                        egui::Button::new("➤").fill(egui::Color32::WHITE),
+                    )
+                    .clicked()
+                {
                     self.send_current_message();
                 }
             });
@@ -456,38 +538,132 @@ impl DropItApp {
     }
 
     fn render_files_view(&mut self, ui: &mut egui::Ui) {
-        ui.heading("File Transfers");
-        ui.add_space(12.0);
-        ui.label("Download folder:");
+        ui.add_space(10.0);
+        ui.heading("Share files privately");
         ui.label(
-            egui::RichText::new(self.settings.download_dir.display().to_string())
+            egui::RichText::new("Send to a nearby device or connect with a one-time code.")
                 .color(self.theme.text_muted),
         );
         ui.add_space(16.0);
-        ui.label("Recent transfers appear in your shared conversation threads.");
+        ui.columns(2, |columns| {
+            egui::Frame::none()
+                .fill(self.theme.card_bg)
+                .stroke(egui::Stroke::new(1.0, self.theme.card_border))
+                .rounding(egui::Rounding::same(12))
+                .inner_margin(14.0)
+                .show(&mut columns[0], |ui| {
+                    ui.label(egui::RichText::new("Your code").strong().size(14.0));
+                    ui.add_space(8.0);
+                    ui.label(egui::RichText::new(&self.pairing_code).monospace().size(22.0));
+                    ui.add_space(10.0);
+                    ui.horizontal(|ui| {
+                        if ui.button("New code").clicked() {
+                            self.pairing_code = crate::pairing::generate_pairing_code();
+                            self.status_message = "New one-time code created".to_string();
+                        }
+                        ui.label(
+                            egui::RichText::new("Valid for 5 minutes")
+                                .size(11.0)
+                                .color(self.theme.text_muted),
+                        );
+                    });
+                });
+            egui::Frame::none()
+                .fill(self.theme.card_bg)
+                .stroke(egui::Stroke::new(1.0, self.theme.card_border))
+                .rounding(egui::Rounding::same(12))
+                .inner_margin(14.0)
+                .show(&mut columns[1], |ui| {
+                    ui.label(egui::RichText::new("Connect with a code").strong().size(14.0));
+                    ui.add_space(8.0);
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.pairing_code_input)
+                            .hint_text("4-river-stone"),
+                    );
+                    if ui
+                        .add(egui::Button::new("Connect").fill(egui::Color32::WHITE))
+                        .clicked()
+                    {
+                        self.status_message =
+                            format!("Connecting with code '{}'", self.pairing_code_input.trim());
+                    }
+                });
+        });
+        ui.add_space(16.0);
+        egui::Frame::none()
+            .fill(egui::Color32::from_rgba_premultiplied(255, 255, 255, 20))
+            .stroke(egui::Stroke::new(1.0, self.theme.card_border))
+            .rounding(egui::Rounding::same(12))
+            .inner_margin(28.0)
+            .show(ui, |ui| {
+                ui.vertical_centered(|ui| {
+                    ui.label(egui::RichText::new("⇩").size(28.0));
+                    ui.label(egui::RichText::new("Drop files here").strong());
+                    ui.label(
+                        egui::RichText::new(
+                            "Choose a chat first, then drag files or folders anywhere into Drop It.",
+                        )
+                        .size(12.0)
+                        .color(self.theme.text_muted),
+                    );
+                });
+            });
+        ui.add_space(12.0);
+        ui.label(
+            egui::RichText::new("●  Anonymous and end-to-end encrypted")
+                .size(12.0)
+                .color(self.theme.accent_green),
+        );
     }
 
     fn render_nearby_view(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Nearby Devices (LAN Discovery)");
-        ui.add_space(8.0);
+        ui.add_space(10.0);
+        ui.heading("Nearby devices");
         ui.label(
-            egui::RichText::new("Listening for UDP announcements on port 53421")
-                .size(12.0)
+            egui::RichText::new("Devices discovered on this Wi-Fi network.")
                 .color(self.theme.text_muted),
         );
-
         ui.add_space(16.0);
-        ui.label("Pair using one-time code (N-word-word):");
-        ui.horizontal(|ui| {
-            ui.text_edit_singleline(&mut self.pairing_code_input);
-            if ui.button("Connect").clicked() {
-                self.status_message =
-                    format!("Connecting with code '{}'...", self.pairing_code_input);
-            }
-        });
-
-        ui.add_space(16.0);
-        ui.label(egui::RichText::new(&self.status_message).color(self.theme.accent_green));
+        for peer in self.peers.clone() {
+            egui::Frame::none()
+                .fill(self.theme.card_bg)
+                .stroke(egui::Stroke::new(1.0, self.theme.card_border))
+                .rounding(egui::Rounding::same(12))
+                .inner_margin(12.0)
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("▣").size(24.0));
+                        ui.vertical(|ui| {
+                            ui.label(egui::RichText::new(&peer.alias).strong());
+                            ui.label(
+                                egui::RichText::new(if peer.is_online {
+                                    "Available now"
+                                } else {
+                                    "Offline"
+                                })
+                                .size(12.0)
+                                .color(self.theme.text_muted),
+                            );
+                        });
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.button("Chat").clicked() {
+                                self.selected_peer_id = Some(peer.id.clone());
+                                self.active_tab = ActiveTab::Chats;
+                            }
+                            if ui.button("Send").clicked() {
+                                self.selected_peer_id = Some(peer.id.clone());
+                                self.active_tab = ActiveTab::Files;
+                            }
+                        });
+                    });
+                });
+            ui.add_space(8.0);
+        }
+        ui.label(
+            egui::RichText::new(&self.status_message)
+                .size(12.0)
+                .color(self.theme.accent_green),
+        );
     }
 
     fn render_settings_view(&mut self, ui: &mut egui::Ui) {

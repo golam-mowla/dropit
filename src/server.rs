@@ -1,4 +1,4 @@
-use crate::messenger::{ChatMessage, ChatSessionManager};
+use crate::messenger::{ChatHistoryStore, ChatMessage, ChatSessionManager};
 use crate::pairing::{DeviceTrustStore, PairingError, SessionTokenStore, TrustStatus};
 use crate::sanitize::safe_destination_path;
 use crate::tls::TlsIdentity;
@@ -31,6 +31,7 @@ pub struct ServerState {
     pub pending_transfers: Arc<Mutex<HashMap<String, tokio::sync::oneshot::Sender<bool>>>>,
     pub cancelled_sessions: Arc<RwLock<HashSet<String>>>,
     pub chat_manager: ChatSessionManager,
+    pub chat_history: ChatHistoryStore,
 }
 
 impl ServerState {
@@ -45,7 +46,7 @@ impl ServerState {
         Self {
             device_id,
             name,
-            download_dir,
+            download_dir: download_dir.clone(),
             token_store,
             cert_fingerprint,
             auto_accept,
@@ -53,6 +54,7 @@ impl ServerState {
             pending_transfers: Arc::new(Mutex::new(HashMap::new())),
             cancelled_sessions: Arc::new(RwLock::new(HashSet::new())),
             chat_manager: ChatSessionManager::new(),
+            chat_history: ChatHistoryStore::new(download_dir.join(".dropit-history")),
         }
     }
 }
@@ -326,19 +328,37 @@ async fn chat_send_handler(
     Json(message): Json<ChatMessage>,
 ) -> impl IntoResponse {
     let id = message.id.clone();
+    let session_id = message.session_id.clone();
     state.chat_manager.append_message(message);
-    Json(ChatSendResponse {
-        status: "delivered".to_string(),
-        id,
-    })
+    let messages = state.chat_manager.get_messages(&session_id);
+    if let Err(error) = state.chat_history.save_thread(&session_id, &messages) {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Could not save encrypted chat history: {error}"),
+        )
+            .into_response();
+    }
+    Json(ChatSendResponse { status: "delivered".to_string(), id }).into_response()
 }
 
 async fn chat_get_handler(
     State(state): State<Arc<ServerState>>,
     Query(query): Query<ChatQuery>,
-) -> impl IntoResponse {
-    let messages = state.chat_manager.get_messages(&query.session_id);
-    Json(messages)
+) -> Result<Json<Vec<ChatMessage>>, (StatusCode, String)> {
+    let in_memory = state.chat_manager.get_messages(&query.session_id);
+    if !in_memory.is_empty() {
+        return Ok(Json(in_memory));
+    }
+    let stored = state
+        .chat_history
+        .load_thread(&query.session_id)
+        .map_err(|error| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Could not load encrypted chat history: {error}"),
+            )
+        })?;
+    Ok(Json(stored))
 }
 
 async fn transfer_handler(

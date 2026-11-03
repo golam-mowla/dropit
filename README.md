@@ -14,6 +14,8 @@ Fast, lightweight, secure local WiFi file transfer tool and anonymous end-to-end
 - **Hardened Path Sanitization**: Path traversal, alternate data streams (`name:stream`), trailing spaces/dots, and Windows reserved names are rejected or sanitized.
 - **Integrity Verification**: Blake3 cryptographic hash verification after transfer.
 - **Zero Configuration Discovery**: Automatic device announcement and discovery over UDP broadcast.
+- **Desktop Shell**: Windows glass-style desktop UI with chats, nearby-device cards,
+  pairing-code entry, and drag-and-drop file bubbles.
 
 ## Ports
 
@@ -45,8 +47,16 @@ Drop It is designed from the ground up for strict anonymity and defense-in-depth
 - **Zero Telemetry**: No tracking, phone-home metrics, external DNS calls, or cloud telemetry servers.
 - **Anonymous Ephemeral Identities**: Peers generate random aliases (format: *Adjective Animal*, e.g., Swift Falcon) and 128-bit randomized device IDs with zero linkage to Windows usernames, SIDs, hostnames, or hardware MAC addresses.
 - **SPAKE2 Code Pairing & TOFU**: Connect with a 5-minute single-use N-word-word pairing code (e.g., 7-amber-falcon) authenticated against TLS certificate fingerprints and cached via Trust-On-First-Use (TOFU) pinning.
-- **End-to-End Encryption with Forward Secrecy**: Chat messages use an HKDF-SHA256 symmetric hash ratchet, deriving fresh ChaCha20-Poly1305 message keys for every single payload.
-- **DPAPI-Protected Storage**: Local chat history on Windows is protected using Data Protection API (CryptProtectData), encrypted transparently with the user's OS credentials.
+- **Pairing Cryptography**: SPAKE2, HKDF, and ChaCha20-Poly1305 building blocks are used for pairing and tested independently.
+- **DPAPI-Protected Storage**: Server-side chat history is stored locally with Windows Data Protection API (CryptProtectData).
+
+## Current status
+
+Drop It is an in-progress LAN application. Direct file transfer, discovery,
+pairing-code validation, and the desktop UI are available. The end-to-end chat
+transport, group chat, relay networking, and background tray notifications are
+not complete yet. See [SECURITY.md](SECURITY.md) for the current security model
+and limitations.
 
 ## Roadmap
 
