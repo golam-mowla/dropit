@@ -9,11 +9,14 @@ use std::path::PathBuf;
 )]
 pub struct Cli {
     #[command(subcommand)]
-    pub command: Commands,
+    pub command: Option<Commands>,
 }
 
 #[derive(Subcommand, Debug, Clone)]
 pub enum Commands {
+    /// Launch the interactive glassmorphism desktop GUI
+    Gui,
+
     /// Send one or more files to a discovered device on your local WiFi
     Send(SendArgs),
 
@@ -60,18 +63,23 @@ pub struct ReceiveArgs {
 
 #[derive(Args, Debug, Clone)]
 pub struct DiscoverArgs {
-    /// Timeout in seconds to scan for devices
+    /// Discovery timeout in seconds (default: 3)
     #[arg(long, default_value_t = 3)]
     pub timeout: u64,
-
-    /// UDP discovery port (default: 53421)
-    #[arg(long, default_value_t = 53421)]
-    pub port: u16,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_cli_parse_default_and_gui() {
+        let args = Cli::parse_from(["dropit"]);
+        assert!(args.command.is_none());
+
+        let args_gui = Cli::parse_from(["dropit", "gui"]);
+        assert!(matches!(args_gui.command, Some(Commands::Gui)));
+    }
 
     #[test]
     fn test_cli_parse_send() {
@@ -83,7 +91,7 @@ mod tests {
             "--port",
             "53420",
         ]);
-        if let Commands::Send(send_args) = args.command {
+        if let Some(Commands::Send(send_args)) = args.command {
             assert_eq!(send_args.target, "192.168.1.5");
             assert_eq!(send_args.files, vec![PathBuf::from("file.txt")]);
             assert_eq!(send_args.port, 53420);
@@ -96,7 +104,7 @@ mod tests {
     #[test]
     fn test_cli_parse_receive() {
         let args = Cli::parse_from(["dropit", "receive", "--port", "53420", "--dir", "downloads"]);
-        if let Commands::Receive(rcv_args) = args.command {
+        if let Some(Commands::Receive(rcv_args)) = args.command {
             assert_eq!(rcv_args.port, 53420);
             assert_eq!(rcv_args.dir, PathBuf::from("downloads"));
         } else {
@@ -107,7 +115,7 @@ mod tests {
     #[test]
     fn test_cli_parse_discover() {
         let args = Cli::parse_from(["dropit", "discover", "--timeout", "5"]);
-        if let Commands::Discover(disc_args) = args.command {
+        if let Some(Commands::Discover(disc_args)) = args.command {
             assert_eq!(disc_args.timeout, 5);
         } else {
             panic!("Expected Discover command");

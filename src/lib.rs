@@ -9,3 +9,5 @@ pub mod server;
 pub mod settings;
 pub mod tls;
 pub mod web;
+
+pub mod gui;
