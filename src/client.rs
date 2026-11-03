@@ -205,7 +205,29 @@ impl DropItClient {
         verify_hash: bool,
         cancel_flag: Option<Arc<AtomicBool>>,
     ) -> Result<()> {
-        let session_id = format!("{:016x}", rand::random::<u64>());
+        self.send_files_with_intent_and_session(
+            None,
+            file_paths,
+            sender_id,
+            sender_alias,
+            verify_hash,
+            cancel_flag,
+        )
+        .await
+    }
+
+    pub async fn send_files_with_intent_and_session<P: AsRef<Path>>(
+        &self,
+        custom_session_id: Option<&str>,
+        file_paths: &[P],
+        sender_id: &str,
+        sender_alias: &str,
+        verify_hash: bool,
+        cancel_flag: Option<Arc<AtomicBool>>,
+    ) -> Result<()> {
+        let session_id = custom_session_id
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| format!("{:016x}", rand::random::<u64>()));
 
         // 1. Collect file metadata
         let mut file_metas = Vec::new();
