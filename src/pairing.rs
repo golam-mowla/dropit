@@ -1,19 +1,18 @@
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
 use chacha20poly1305::{
     ChaCha20Poly1305, Key, Nonce,
     aead::{Aead, KeyInit},
 };
 use hkdf::Hkdf;
 use rand::Rng;
-use serde::{Deserialize, Serialize};
 use sha2::Sha256;
-use spake2::{Ed25519Group, Spake2};
+use spake2::{Ed25519Group, Identity, Password, Spake2};
 use std::collections::HashMap;
 use std::net::IpAddr;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use zeroize::{Zeroize, ZeroizeOnDrop};
+use zeroize::Zeroize;
 
 // Embedded curated word lists for N-word-word pairing codes
 const ADJECTIVES: &[&str] = &[
@@ -179,7 +178,7 @@ impl PairingSessionStore {
     }
 
     /// Verifies a pairing code attempt from a specific IP.
-    /// Invalides the code if strikes exceed max_strikes.
+    /// Invalidates the code if strikes exceed max_strikes.
     pub fn verify_code(&self, candidate: &str, ip: IpAddr) -> Result<(), PairingError> {
         if !self.check_rate_limit(ip) {
             return Err(PairingError::RateLimited);
@@ -288,11 +287,10 @@ pub struct Spake2Responder {
 impl Spake2Initiator {
     /// Starts SPAKE2 as initiator using the pairing code and local TLS fingerprint.
     pub fn start(code: &str, local_cert_fingerprint: &str) -> (Self, Vec<u8>) {
-        let (spake, msg) = Spake2::<Ed25519Group>::start_a(
-            code.trim().as_bytes(),
-            SPAKE_ID_INITIATOR,
-            SPAKE_ID_RESPONDER,
-        );
+        let password = Password::new(code.trim().as_bytes());
+        let id_a = Identity::new(SPAKE_ID_INITIATOR);
+        let id_b = Identity::new(SPAKE_ID_RESPONDER);
+        let (spake, msg) = Spake2::<Ed25519Group>::start_a(&password, &id_a, &id_b);
         (
             Self {
                 spake,
@@ -326,11 +324,10 @@ impl Spake2Initiator {
 impl Spake2Responder {
     /// Starts SPAKE2 as responder using the pairing code and local TLS fingerprint.
     pub fn start(code: &str, local_cert_fingerprint: &str) -> (Self, Vec<u8>) {
-        let (spake, msg) = Spake2::<Ed25519Group>::start_b(
-            code.trim().as_bytes(),
-            SPAKE_ID_INITIATOR,
-            SPAKE_ID_RESPONDER,
-        );
+        let password = Password::new(code.trim().as_bytes());
+        let id_a = Identity::new(SPAKE_ID_INITIATOR);
+        let id_b = Identity::new(SPAKE_ID_RESPONDER);
+        let (spake, msg) = Spake2::<Ed25519Group>::start_b(&password, &id_a, &id_b);
         (
             Self {
                 spake,
@@ -518,7 +515,7 @@ pub fn available_disk_space(path: &Path) -> std::io::Result<u64> {
     let mut total_bytes: u64 = 0;
     let mut total_free_bytes: u64 = 0;
 
-    extern "system" {
+    unsafe extern "system" {
         fn GetDiskFreeSpaceExW(
             lpDirectoryName: *const u16,
             lpFreeBytesAvailableToCaller: *mut u64,

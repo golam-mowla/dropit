@@ -4,13 +4,13 @@ use crate::tls::TlsIdentity;
 use anyhow::{Context, Result};
 use axum::{
     Json, Router,
-    extract::{ConnectInfo, Multipart, State},
+    extract::{Multipart, State},
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
     routing::{get, post},
 };
 use serde::{Deserialize, Serialize};
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
@@ -93,11 +93,14 @@ async fn token_handler(State(state): State<Arc<ServerState>>) -> impl IntoRespon
 
 async fn pairing_code_handler(
     State(state): State<Arc<ServerState>>,
-    connect_info: Option<ConnectInfo<SocketAddr>>,
+    headers: HeaderMap,
     Json(payload): Json<PairingCodeRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    let client_ip = connect_info
-        .map(|ci| ci.0.ip())
+    let client_ip = headers
+        .get("x-forwarded-for")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.split(',').next())
+        .and_then(|s| s.trim().parse::<IpAddr>().ok())
         .unwrap_or(IpAddr::V4(Ipv4Addr::LOCALHOST));
 
     // 1. Verify pairing code with IP rate limiting and 3 strikes lockout
@@ -269,7 +272,7 @@ pub async fn run_server(
     info!("Starting Drop It TLS server on {}", addr);
     axum_server::bind_rustls(addr, rustls_config)
         .handle(handle)
-        .serve(app.into_make_service_with_connect_info::<SocketAddr>())
+        .serve(app.into_make_service())
         .await
         .context("Server error")?;
 
