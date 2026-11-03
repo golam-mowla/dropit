@@ -10,6 +10,24 @@ use std::net::SocketAddr;
 use std::time::Duration;
 use tracing::{error, info};
 
+fn run_gui() -> Result<()> {
+    let native_options = eframe::NativeOptions {
+        viewport: eframe::egui::ViewportBuilder::default()
+            .with_title("Drop It")
+            .with_inner_size([960.0, 640.0])
+            .with_min_inner_size([720.0, 480.0])
+            .with_transparent(true),
+        ..Default::default()
+    };
+
+    eframe::run_native(
+        "Drop It",
+        native_options,
+        Box::new(|_cc| Ok(Box::new(dropit::gui::DropItApp::new_standalone()))),
+    )
+    .map_err(|e| anyhow::anyhow!("GUI execution error: {:?}", e))
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     dropit::tls::init_crypto_provider();
@@ -24,7 +42,11 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Send(send_args) => {
+        None | Some(Commands::Gui) => {
+            info!("Launching Drop It glassmorphism desktop GUI");
+            run_gui()
+        }
+        Some(Commands::Send(send_args)) => {
             info!(
                 "Sending {} file(s) to {}:{}",
                 send_args.files.len(),
@@ -35,8 +57,9 @@ async fn main() -> Result<()> {
             client
                 .send_files(&send_args.files, send_args.verify_hash)
                 .await?;
+            Ok(())
         }
-        Commands::Receive(receive_args) => {
+        Some(Commands::Receive(receive_args)) => {
             info!("Starting Drop It receiver on port {}", receive_args.port);
             let tls_identity =
                 TlsIdentity::generate().context("Failed to generate TLS certificate")?;
@@ -96,8 +119,9 @@ async fn main() -> Result<()> {
 
             let bind_addr: SocketAddr = format!("0.0.0.0:{}", receive_args.port).parse()?;
             server::run_server(bind_addr, server_state, &tls_identity, shutdown_server_rx).await?;
+            Ok(())
         }
-        Commands::Discover(discover_args) => {
+        Some(Commands::Discover(discover_args)) => {
             info!(
                 "Scanning for nearby Drop It devices (timeout: {}s)...",
                 discover_args.timeout
@@ -122,8 +146,7 @@ async fn main() -> Result<()> {
                     );
                 }
             }
+            Ok(())
         }
     }
-
-    Ok(())
 }
