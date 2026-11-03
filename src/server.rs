@@ -1,10 +1,11 @@
+use crate::messenger::{ChatMessage, ChatSessionManager};
 use crate::pairing::{DeviceTrustStore, PairingError, SessionTokenStore, TrustStatus};
 use crate::sanitize::safe_destination_path;
 use crate::tls::TlsIdentity;
 use anyhow::{Context, Result};
 use axum::{
     Json, Router,
-    extract::{Multipart, State},
+    extract::{Multipart, Query, State},
     http::{HeaderMap, StatusCode},
     response::{Html, IntoResponse},
     routing::{get, post},
@@ -29,6 +30,7 @@ pub struct ServerState {
     pub trust_store: DeviceTrustStore,
     pub pending_transfers: Arc<Mutex<HashMap<String, tokio::sync::oneshot::Sender<bool>>>>,
     pub cancelled_sessions: Arc<RwLock<HashSet<String>>>,
+    pub chat_manager: ChatSessionManager,
 }
 
 impl ServerState {
@@ -50,6 +52,7 @@ impl ServerState {
             trust_store: DeviceTrustStore::new(),
             pending_transfers: Arc::new(Mutex::new(HashMap::new())),
             cancelled_sessions: Arc::new(RwLock::new(HashSet::new())),
+            chat_manager: ChatSessionManager::new(),
         }
     }
 }
@@ -128,6 +131,17 @@ pub struct TransferredFileInfo {
     pub blake3_hash: String,
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct ChatSendResponse {
+    pub status: String,
+    pub id: String,
+}
+
+#[derive(Deserialize)]
+pub struct ChatQuery {
+    pub session_id: String,
+}
+
 pub fn create_router(state: ServerState) -> Router {
     Router::new()
         .route("/", get(web_ui_handler))
@@ -140,6 +154,8 @@ pub fn create_router(state: ServerState) -> Router {
         .route("/api/transfer/decision", post(decision_handler))
         .route("/api/transfer/cancel", post(cancel_handler))
         .route("/api/transfer", post(transfer_handler))
+        .route("/api/chat/message", post(chat_send_handler))
+        .route("/api/chat/messages", get(chat_get_handler))
         .with_state(Arc::new(state))
 }
 
@@ -305,6 +321,26 @@ async fn cancel_handler(
     (StatusCode::OK, "Session marked cancelled")
 }
 
+async fn chat_send_handler(
+    State(state): State<Arc<ServerState>>,
+    Json(message): Json<ChatMessage>,
+) -> impl IntoResponse {
+    let id = message.id.clone();
+    state.chat_manager.append_message(message);
+    Json(ChatSendResponse {
+        status: "delivered".to_string(),
+        id,
+    })
+}
+
+async fn chat_get_handler(
+    State(state): State<Arc<ServerState>>,
+    Query(query): Query<ChatQuery>,
+) -> impl IntoResponse {
+    let messages = state.chat_manager.get_messages(&query.session_id);
+    Json(messages)
+}
+
 async fn transfer_handler(
     State(state): State<Arc<ServerState>>,
     headers: HeaderMap,
@@ -427,6 +463,22 @@ async fn transfer_handler(
             "Successfully received file '{}' ({} bytes, hash: {})",
             filename, total_bytes, hash_hex
         );
+
+        // Record transferred file in chat thread as a FileBubble
+        if let Some(ref sid) = session_id {
+            let bubble = ChatMessage::new(
+                sid,
+                &state.device_id,
+                &state.name,
+                crate::messenger::MessagePayload::FileBubble {
+                    file_id: format!("{:016x}", rand::random::<u64>()),
+                    filename: filename.clone(),
+                    size: total_bytes,
+                    blake3_hash: hash_hex.clone(),
+                },
+            );
+            state.chat_manager.append_message(bubble);
+        }
 
         transferred_files.push(TransferredFileInfo {
             filename,

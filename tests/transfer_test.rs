@@ -283,3 +283,106 @@ async fn test_embedded_web_ui_endpoint() {
 
     let _ = shutdown_tx.send(true);
 }
+
+#[tokio::test]
+async fn test_loopback_chat_messaging_and_file_bubble() {
+    let (port, temp_dir, shutdown_tx) = spawn_test_server(true).await;
+    let client = DropItClient::new("127.0.0.1", port).expect("Client init failed");
+
+    let session_id = "session-chat-100";
+
+    // 1. Send text chat message
+    let text_msg = dropit::messenger::ChatMessage::new(
+        session_id,
+        "device-alice",
+        "Swift Falcon",
+        dropit::messenger::MessagePayload::Text("Hello over encrypted channel!".to_string()),
+    );
+    let msg_id = client
+        .send_chat_message(&text_msg)
+        .await
+        .expect("Failed to send text chat");
+    assert_eq!(msg_id, text_msg.id);
+
+    // 2. Send typing indicator
+    let typing_msg = dropit::messenger::ChatMessage::new(
+        session_id,
+        "device-alice",
+        "Swift Falcon",
+        dropit::messenger::MessagePayload::TypingIndicator { is_typing: true },
+    );
+    client
+        .send_chat_message(&typing_msg)
+        .await
+        .expect("Failed to send typing");
+
+    // 3. Send file associated with the same session_id
+    let f1 = temp_dir.path().join("chat_shared_file.bin");
+    tokio::fs::write(&f1, b"Payload inside shared conversation thread")
+        .await
+        .unwrap();
+    client
+        .send_files_with_intent_and_session(
+            Some(session_id),
+            &[&f1],
+            "device-alice",
+            "Swift Falcon",
+            true,
+            None,
+        )
+        .await
+        .expect("Transfer failed");
+
+    // 4. Retrieve conversation thread messages
+    let msgs = client
+        .get_chat_messages(session_id)
+        .await
+        .expect("Failed to get messages");
+    assert_eq!(msgs.len(), 3);
+    assert_eq!(msgs[0].id, text_msg.id);
+
+    // Verify presence of text
+    match &msgs[0].payload {
+        dropit::messenger::MessagePayload::Text(content) => {
+            assert_eq!(content, "Hello over encrypted channel!");
+        }
+        _ => panic!("Expected Text payload"),
+    }
+
+    // Verify presence of file bubble in the shared thread
+    match &msgs[2].payload {
+        dropit::messenger::MessagePayload::FileBubble { filename, size, .. } => {
+            assert_eq!(filename, "chat_shared_file.bin");
+            assert_eq!(*size, 41);
+        }
+        _ => panic!("Expected FileBubble payload for transferred file"),
+    }
+
+    let _ = shutdown_tx.send(true);
+}
+
+#[test]
+fn test_messenger_symmetric_ratchet_forward_secrecy() {
+    let shared_secret = [0x77u8; 32];
+    let mut alice = dropit::messenger::SymmetricRatchet::new(shared_secret);
+    let mut bob = dropit::messenger::SymmetricRatchet::new(shared_secret);
+
+    // Turn 1: Alice -> Bob
+    let plaintext1 = b"Message 1 with forward secrecy";
+    let frame1 = dropit::messenger::pack_frame(&mut alice, plaintext1).expect("Pack failed");
+    let decrypted1 = dropit::messenger::unpack_frame(&mut bob, &frame1).expect("Unpack failed");
+    assert_eq!(decrypted1, plaintext1);
+
+    // Turn 2: Alice -> Bob
+    let plaintext2 = b"Message 2 with next step key";
+    let frame2 = dropit::messenger::pack_frame(&mut alice, plaintext2).expect("Pack failed");
+    let decrypted2 = dropit::messenger::unpack_frame(&mut bob, &frame2).expect("Unpack failed");
+    assert_eq!(decrypted2, plaintext2);
+
+    // Tampered frame fails tag authentication
+    let mut tampered_frame = frame2.clone();
+    let last = tampered_frame.len() - 1;
+    tampered_frame[last] ^= 0x01;
+    let tamper_res = dropit::messenger::unpack_frame(&mut bob, &tampered_frame);
+    assert!(tamper_res.is_err());
+}

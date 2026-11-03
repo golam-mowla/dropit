@@ -380,4 +380,54 @@ impl DropItClient {
 
         Ok(())
     }
+
+    /// Sends an encrypted or plaintext chat message / event into a session thread.
+    pub async fn send_chat_message(
+        &self,
+        message: &crate::messenger::ChatMessage,
+    ) -> Result<String> {
+        let url = format!("{}/api/chat/message", self.base_url);
+        let resp = self
+            .client
+            .post(&url)
+            .json(message)
+            .send()
+            .await
+            .context("Failed to send chat message")?;
+
+        if !resp.status().is_success() {
+            bail!("Failed to send chat message: {}", resp.status());
+        }
+
+        let res: crate::server::ChatSendResponse = resp
+            .json()
+            .await
+            .context("Failed to parse chat send response")?;
+        Ok(res.id)
+    }
+
+    /// Fetches all messages and events in a chat session thread.
+    pub async fn get_chat_messages(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<crate::messenger::ChatMessage>> {
+        let url = format!(
+            "{}/api/chat/messages?session_id={}",
+            self.base_url, session_id
+        );
+        let resp = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .context("Failed to fetch chat messages")?;
+
+        if !resp.status().is_success() {
+            bail!("Failed to fetch chat messages: {}", resp.status());
+        }
+
+        resp.json::<Vec<crate::messenger::ChatMessage>>()
+            .await
+            .context("Failed to parse chat messages")
+    }
 }
