@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <defs>
+    <mask id="trayArrowMask">
+      <rect width="32" height="32" fill="white"/>
+      <path d="M16 23 L11 17 H14 V12 H18 V17 H21 Z" fill="black"/>
+    </mask>
+  </defs>
+  <path d="M16 4 C16 4 7 14 7 20 C7 25 11 29 16 29 C21 29 25 25 25 20 C25 14 16 4 16 4 Z" fill="#FFFFFF" mask="url(#trayArrowMask)"/>
+</svg>
