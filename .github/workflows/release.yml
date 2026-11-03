@@ -51,9 +51,10 @@ jobs:
           Compress-Archive -Path dropit-portable/* -DestinationPath "dist/dropit-${ver}-windows-x64.zip" -Force
 
           # Generate SHA256 checksums
-          Get-FileHash -Algorithm SHA256 dist/* | ForEach-Object {
-            "$($_.Hash)  $([System.IO.Path]::GetFileName($_.Path))"
-          } | Out-File -Encoding utf8 dist/SHA256SUMS.txt
+          Get-ChildItem -Path dist -File | Where-Object { $_.Name -ne "SHA256SUMS.txt" } | Get-FileHash -Algorithm SHA256 | ForEach-Object {
+            "$($_.Hash.ToLower())  $([System.IO.Path]::GetFileName($_.Path))"
+          } | Set-Content -Encoding utf8 SHA256SUMS.txt
+          Move-Item SHA256SUMS.txt dist/SHA256SUMS.txt -Force
 
       - name: Publish GitHub Release
         env:
