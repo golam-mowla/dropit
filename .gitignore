@@ -1,0 +1,8 @@
+/target
+**/*.rs.bk
+Cargo.lock
+*.exe
+*.pdb
+*.zip
+*.sha256
+.env
