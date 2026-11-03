@@ -369,20 +369,27 @@ fn test_messenger_symmetric_ratchet_forward_secrecy() {
 
     // Turn 1: Alice -> Bob
     let plaintext1 = b"Message 1 with forward secrecy";
-    let frame1 = dropit::messenger::pack_frame(&mut alice, plaintext1).expect("Pack failed");
-    let decrypted1 = dropit::messenger::unpack_frame(&mut bob, &frame1).expect("Unpack failed");
+    let key_alice1 = alice.step().expect("Alice step 1 failed");
+    let frame1 = dropit::messenger::pack_frame(&key_alice1, 1, plaintext1).expect("Pack failed");
+    let key_bob1 = bob.step().expect("Bob step 1 failed");
+    assert_eq!(key_alice1, key_bob1);
+    let decrypted1 = dropit::messenger::unpack_frame(&key_bob1, &frame1).expect("Unpack failed");
     assert_eq!(decrypted1, plaintext1);
 
     // Turn 2: Alice -> Bob
     let plaintext2 = b"Message 2 with next step key";
-    let frame2 = dropit::messenger::pack_frame(&mut alice, plaintext2).expect("Pack failed");
-    let decrypted2 = dropit::messenger::unpack_frame(&mut bob, &frame2).expect("Unpack failed");
+    let key_alice2 = alice.step().expect("Alice step 2 failed");
+    let frame2 = dropit::messenger::pack_frame(&key_alice2, 2, plaintext2).expect("Pack failed");
+    let key_bob2 = bob.step().expect("Bob step 2 failed");
+    assert_eq!(key_alice2, key_bob2);
+    assert_ne!(key_alice1, key_alice2);
+    let decrypted2 = dropit::messenger::unpack_frame(&key_bob2, &frame2).expect("Unpack failed");
     assert_eq!(decrypted2, plaintext2);
 
     // Tampered frame fails tag authentication
     let mut tampered_frame = frame2.clone();
     let last = tampered_frame.len() - 1;
     tampered_frame[last] ^= 0x01;
-    let tamper_res = dropit::messenger::unpack_frame(&mut bob, &tampered_frame);
+    let tamper_res = dropit::messenger::unpack_frame(&key_bob2, &tampered_frame);
     assert!(tamper_res.is_err());
 }
