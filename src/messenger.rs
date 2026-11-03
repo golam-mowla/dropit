@@ -170,6 +170,7 @@ pub fn unpack_frame(key: &[u8; 32], frame: &[u8]) -> Result<Vec<u8>> {
 
 #[cfg(windows)]
 pub fn dpapi_encrypt(plaintext: &[u8]) -> Result<Vec<u8>> {
+    #[allow(non_camel_case_types, non_snake_case)]
     #[repr(C)]
     struct DATA_BLOB {
         cbData: u32,
@@ -227,6 +228,7 @@ pub fn dpapi_encrypt(plaintext: &[u8]) -> Result<Vec<u8>> {
 
 #[cfg(windows)]
 pub fn dpapi_decrypt(ciphertext: &[u8]) -> Result<Vec<u8>> {
+    #[allow(non_camel_case_types, non_snake_case)]
     #[repr(C)]
     struct DATA_BLOB {
         cbData: u32,
