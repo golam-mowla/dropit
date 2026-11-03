@@ -305,7 +305,7 @@ impl eframe::App for DropItApp {
                 ui.add_space(8.0);
                 egui::Frame::none()
                     .fill(self.theme.card_bg)
-                    .stroke(egui::Stroke::new(1.0, self.theme.card_border))
+                    .stroke(egui::Stroke::new(1.0_f32, self.theme.card_border))
                     .inner_margin(8.0)
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
@@ -409,7 +409,7 @@ impl DropItApp {
             // Drag and drop dropzone card
             egui::Frame::none()
                 .fill(self.theme.card_bg)
-                .stroke(egui::Stroke::new(1.0, self.theme.gradient_purple))
+                .stroke(egui::Stroke::new(1.0_f32, self.theme.gradient_purple))
                 .inner_margin(12.0)
                 .show(ui, |ui| {
                     ui.vertical_centered(|ui| {
@@ -454,7 +454,7 @@ impl DropItApp {
                                 }
                                 egui::Frame::none()
                                     .fill(bubble_color)
-                                    .stroke(egui::Stroke::new(1.0, self.theme.card_border))
+                                    .stroke(egui::Stroke::new(1.0_f32, self.theme.card_border))
                                     .inner_margin(8.0)
                                     .show(ui, |ui| match &msg.payload {
                                         MessagePayload::Text(text) => {
