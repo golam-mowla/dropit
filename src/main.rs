@@ -128,7 +128,7 @@ async fn main() -> Result<()> {
             );
             let peers = discovery::scan_nearby(
                 Duration::from_secs(discover_args.timeout),
-                discover_args.port,
+                discovery::DEFAULT_DISCOVERY_PORT,
             )
             .await?;
             if peers.is_empty() {
