@@ -3,7 +3,10 @@ use crate::messenger::{ChatMessage, MessagePayload};
 use crate::settings::AppSettings;
 use eframe::egui;
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::sync::mpsc::{self, Receiver, Sender};
+use std::time::{Duration, Instant};
 
 // ============================================================================
 // Windows DWM Acrylic / Mica Backdrop FFI
@@ -129,9 +132,33 @@ pub struct DropItApp {
     pub message_input: String,
     pub search_query: String,
     pub pairing_code_input: String,
+    pub peer_address_input: String,
     pub pairing_code: String,
     pub status_message: String,
     pub dropped_files_queue: Vec<PathBuf>,
+    peer_clients: HashMap<String, crate::client::DropItClient>,
+    chat_session_ids: HashMap<String, String>,
+    network_runtime: Option<tokio::runtime::Runtime>,
+    server_shutdown: Option<tokio::sync::watch::Sender<bool>>,
+    network_events_tx: Sender<NetworkEvent>,
+    network_events_rx: Receiver<NetworkEvent>,
+    last_message_poll: Instant,
+}
+
+enum NetworkEvent {
+    Connected {
+        peer: PeerEntry,
+        client: crate::client::DropItClient,
+        session_id: String,
+    },
+    Messages {
+        peer_id: String,
+        messages: Vec<ChatMessage>,
+    },
+    TransferFinished {
+        filename_count: usize,
+    },
+    Failed(String),
 }
 
 impl Default for DropItApp {
@@ -169,6 +196,7 @@ impl DropItApp {
             )],
         );
 
+        let (network_events_tx, network_events_rx) = mpsc::channel();
         Self {
             theme: GlassTheme::default(),
             identity,
@@ -180,10 +208,47 @@ impl DropItApp {
             message_input: String::new(),
             search_query: String::new(),
             pairing_code_input: String::new(),
+            peer_address_input: String::new(),
             pairing_code: crate::pairing::generate_pairing_code(),
             status_message: "Drop It ready (LAN anonymous)".to_string(),
             dropped_files_queue: Vec::new(),
+            peer_clients: HashMap::new(),
+            chat_session_ids: HashMap::new(),
+            network_runtime: None,
+            server_shutdown: None,
+            network_events_tx,
+            network_events_rx,
+            last_message_poll: Instant::now(),
         }
+    }
+
+    pub fn new_networked() -> anyhow::Result<Self> {
+        let mut app = Self::new_standalone();
+        let runtime = tokio::runtime::Runtime::new()?;
+        let tls_identity = crate::tls::TlsIdentity::generate()?;
+        let token_store = crate::pairing::SessionTokenStore::new();
+        let pairing_code = token_store.pairing_session().generate_code();
+        let server_state = crate::server::ServerState::new(
+            app.identity.device_id.clone(),
+            app.identity.alias.clone(),
+            app.settings.download_dir.clone(),
+            token_store,
+            tls_identity.fingerprint.clone(),
+            app.settings.auto_accept,
+        );
+        let address: SocketAddr = format!("0.0.0.0:{}", app.settings.port).parse()?;
+        let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+        runtime.spawn(async move {
+            if let Err(error) = crate::server::run_server(address, server_state, &tls_identity, shutdown_rx).await {
+                tracing::error!("GUI receiver stopped: {error}");
+            }
+        });
+
+        app.pairing_code = pairing_code;
+        app.status_message = format!("Ready to receive on port {}", app.settings.port);
+        app.server_shutdown = Some(shutdown_tx);
+        app.network_runtime = Some(runtime);
+        Ok(app)
     }
 
     pub fn send_current_message(&mut self) {
@@ -193,8 +258,13 @@ impl DropItApp {
         }
 
         if let Some(peer_id) = &self.selected_peer_id {
+            let session_id = self
+                .chat_session_ids
+                .get(peer_id)
+                .cloned()
+                .unwrap_or_else(|| peer_id.clone());
             let msg = ChatMessage::new(
-                peer_id,
+                &session_id,
                 &self.identity.device_id,
                 &self.identity.alias,
                 MessagePayload::Text(content),
@@ -202,7 +272,17 @@ impl DropItApp {
             self.chat_messages
                 .entry(peer_id.clone())
                 .or_default()
-                .push(msg);
+                .push(msg.clone());
+            if let (Some(runtime), Some(client)) =
+                (&self.network_runtime, self.peer_clients.get(peer_id).cloned())
+            {
+                let event_tx = self.network_events_tx.clone();
+                runtime.spawn(async move {
+                    if let Err(error) = client.send_chat_message(&msg).await {
+                        let _ = event_tx.send(NetworkEvent::Failed(error.to_string()));
+                    }
+                });
+            }
             self.message_input.clear();
         }
     }
@@ -213,10 +293,127 @@ impl DropItApp {
         let _ = self.settings.save();
         self.status_message = format!("Alias regenerated to '{}'", self.identity.alias);
     }
+
+    fn connect_with_code(&mut self) {
+        let host = self.peer_address_input.trim().to_string();
+        let code = self.pairing_code_input.trim().to_string();
+        if host.is_empty() || code.is_empty() {
+            self.status_message = "Enter a device address and one-time code".to_string();
+            return;
+        }
+        let Some(runtime) = &self.network_runtime else {
+            self.status_message = "Network receiver is not running".to_string();
+            return;
+        };
+
+        let sender_id = self.identity.device_id.clone();
+        let sender_alias = self.identity.alias.clone();
+        let port = self.settings.port;
+        let event_tx = self.network_events_tx.clone();
+        self.status_message = format!("Connecting to {host}");
+        runtime.spawn(async move {
+            let result = async {
+                let client = crate::client::DropItClient::new(&host, port)?;
+                let info = client.get_info().await?;
+                let pairing = client
+                    .pair_with_code(&code, &sender_id, "gui-client-certificate")
+                    .await?;
+                let peer = PeerEntry {
+                    id: info.device_id,
+                    alias: info.name,
+                    ip: host,
+                    port,
+                    is_online: true,
+                    unread_count: 0,
+                };
+                let session_id = format!("chat-{}", pairing.token);
+                Ok::<_, anyhow::Error>((peer, client, session_id))
+            }
+            .await;
+
+            match result {
+                Ok((peer, client, session_id)) => {
+                    let _ = event_tx.send(NetworkEvent::Connected {
+                        peer,
+                        client,
+                        session_id,
+                    });
+                }
+                Err(error) => {
+                    let _ = event_tx.send(NetworkEvent::Failed(error.to_string()));
+                }
+            }
+        });
+    }
+
+    fn poll_network_events(&mut self) {
+        while let Ok(event) = self.network_events_rx.try_recv() {
+            match event {
+                NetworkEvent::Connected {
+                    peer,
+                    client,
+                    session_id,
+                } => {
+                    let peer_id = peer.id.clone();
+                    self.peers.retain(|existing| existing.id != peer_id);
+                    self.peers.push(peer);
+                    self.peer_clients.insert(peer_id.clone(), client);
+                    self.chat_session_ids.insert(peer_id.clone(), session_id);
+                    self.chat_messages.entry(peer_id.clone()).or_default();
+                    self.selected_peer_id = Some(peer_id);
+                    self.active_tab = ActiveTab::Chats;
+                    self.status_message = "Encrypted peer connected".to_string();
+                }
+                NetworkEvent::Messages { peer_id, messages } => {
+                    let thread = self.chat_messages.entry(peer_id).or_default();
+                    for message in messages {
+                        if !thread.iter().any(|existing| existing.id == message.id) {
+                            thread.push(message);
+                        }
+                    }
+                }
+                NetworkEvent::TransferFinished { filename_count } => {
+                    self.status_message = format!("Sent {filename_count} file(s)");
+                }
+                NetworkEvent::Failed(message) => self.status_message = message,
+            }
+        }
+    }
+
+    fn poll_peer_messages(&mut self) {
+        if self.last_message_poll.elapsed() < Duration::from_secs(2) {
+            return;
+        }
+        self.last_message_poll = Instant::now();
+        let Some(runtime) = &self.network_runtime else {
+            return;
+        };
+        for (peer_id, client) in self.peer_clients.clone() {
+            let Some(session_id) = self.chat_session_ids.get(&peer_id).cloned() else {
+                continue;
+            };
+            let event_tx = self.network_events_tx.clone();
+            runtime.spawn(async move {
+                if let Ok(messages) = client.get_chat_messages(&session_id).await {
+                    let _ = event_tx.send(NetworkEvent::Messages { peer_id, messages });
+                }
+            });
+        }
+    }
+}
+
+impl Drop for DropItApp {
+    fn drop(&mut self) {
+        if let Some(shutdown) = &self.server_shutdown {
+            let _ = shutdown.send(true);
+        }
+    }
 }
 
 impl eframe::App for DropItApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.poll_network_events();
+        self.poll_peer_messages();
         // Handle drag and drop files
         ctx.input(|i| {
             if !i.raw.dropped_files.is_empty() {
@@ -226,7 +423,8 @@ impl eframe::App for DropItApp {
                     }
                 }
                 if let Some(peer_id) = &self.selected_peer_id {
-                    for path in self.dropped_files_queue.drain(..) {
+                    let paths: Vec<PathBuf> = self.dropped_files_queue.drain(..).collect();
+                    for path in &paths {
                         let name = path
                             .file_name()
                             .and_then(|n| n.to_str())
@@ -248,6 +446,35 @@ impl eframe::App for DropItApp {
                             .entry(peer_id.clone())
                             .or_default()
                             .push(bubble);
+                    }
+                    if let (Some(runtime), Some(client)) = (
+                        &self.network_runtime,
+                        self.peer_clients.get(peer_id).cloned(),
+                    ) {
+                        let sender_id = self.identity.device_id.clone();
+                        let sender_alias = self.identity.alias.clone();
+                        let event_tx = self.network_events_tx.clone();
+                        let filename_count = paths.len();
+                        runtime.spawn(async move {
+                            let result = client
+                                .send_files_with_intent(
+                                    &paths,
+                                    &sender_id,
+                                    &sender_alias,
+                                    true,
+                                    None,
+                                )
+                                .await;
+                            match result {
+                                Ok(()) => {
+                                    let _ = event_tx
+                                        .send(NetworkEvent::TransferFinished { filename_count });
+                                }
+                                Err(error) => {
+                                    let _ = event_tx.send(NetworkEvent::Failed(error.to_string()));
+                                }
+                            }
+                        });
                     }
                 }
             }
@@ -583,6 +810,10 @@ impl DropItApp {
                     );
                     ui.add_space(8.0);
                     ui.add(
+                        egui::TextEdit::singleline(&mut self.peer_address_input)
+                            .hint_text("Device address, e.g. 192.168.1.20"),
+                    );
+                    ui.add(
                         egui::TextEdit::singleline(&mut self.pairing_code_input)
                             .hint_text("4-river-stone"),
                     );
@@ -590,8 +821,7 @@ impl DropItApp {
                         .add(egui::Button::new("Connect").fill(egui::Color32::WHITE))
                         .clicked()
                     {
-                        self.status_message =
-                            format!("Connecting with code '{}'", self.pairing_code_input.trim());
+                        self.connect_with_code();
                     }
                 });
         });

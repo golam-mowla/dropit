@@ -18,6 +18,7 @@ pub struct ProgressUpdate {
     pub total_bytes: u64,
 }
 
+#[derive(Clone)]
 pub struct DropItClient {
     client: reqwest::Client,
     base_url: String,

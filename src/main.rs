@@ -29,10 +29,11 @@ fn run_gui() -> Result<()> {
         ..Default::default()
     };
 
+    let app = dropit::gui::DropItApp::new_networked()?;
     eframe::run_native(
         "Drop It",
         native_options,
-        Box::new(|_cc| Ok(Box::new(dropit::gui::DropItApp::new_standalone()))),
+        Box::new(move |_cc| Ok(Box::new(app))),
     )
     .map_err(|e| anyhow::anyhow!("GUI execution error: {:?}", e))
 }
