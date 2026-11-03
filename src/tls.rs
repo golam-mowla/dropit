@@ -39,8 +39,8 @@ impl TlsIdentity {
         let cert_der = pem_to_der(&self.cert_pem)?;
         let key_der = pem_to_der(&self.key_pem)?;
 
-        let cert_chain = vec![rustls_pki_types::CertificateDer::from(cert_der)];
-        let private_key = rustls_pki_types::PrivateKeyDer::Pkcs8(key_der.into());
+        let cert_chain = vec![rustls::pki_types::CertificateDer::from(cert_der)];
+        let private_key = rustls::pki_types::PrivateKeyDer::Pkcs8(key_der.into());
 
         let mut config = rustls::ServerConfig::builder_with_provider(Arc::new(
             rustls::crypto::ring::default_provider(),
@@ -57,7 +57,7 @@ impl TlsIdentity {
     pub fn client_config_with_cert(peer_cert_pem: &str) -> Result<rustls::ClientConfig> {
         let peer_der = pem_to_der(peer_cert_pem)?;
         let mut root_store = rustls::RootCertStore::empty();
-        root_store.add(rustls_pki_types::CertificateDer::from(peer_der))?;
+        root_store.add(rustls::pki_types::CertificateDer::from(peer_der))?;
 
         let config = rustls::ClientConfig::builder_with_provider(Arc::new(
             rustls::crypto::ring::default_provider(),

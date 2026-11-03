@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
-use tracing::{error, info};
+use tracing::info;
 
 #[derive(Clone)]
 pub struct ServerState {
