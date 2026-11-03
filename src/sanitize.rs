@@ -120,8 +120,8 @@ mod tests {
     #[test]
     fn test_illegal_characters() {
         assert_eq!(
-            sanitize_filename("hello<?>*|:file.txt"),
-            "hello_______file.txt"
+            sanitize_filename("hello<?>*|\"file.txt"),
+            "hello______file.txt"
         );
     }
 
