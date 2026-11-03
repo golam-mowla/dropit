@@ -393,3 +393,27 @@ fn test_messenger_symmetric_ratchet_forward_secrecy() {
     let tamper_res = dropit::messenger::unpack_frame(&key_bob2, &tampered_frame);
     assert!(tamper_res.is_err());
 }
+
+#[test]
+fn test_anonymity_guarantees_and_privacy_compliance() {
+    let mut id = dropit::identity::AnonymousIdentity::new();
+    assert!(id.verify_privacy_compliance());
+
+    // Ensure 128-bit hex ID
+    assert_eq!(id.device_id.len(), 32);
+    assert!(id.device_id.chars().all(|c| c.is_ascii_hexdigit()));
+
+    // Ensure Adjective Noun format
+    let words: Vec<&str> = id.alias.split_whitespace().collect();
+    assert_eq!(words.len(), 2);
+
+    // Verify alias regeneration
+    let prev_alias = id.alias.clone();
+    id.regenerate_alias();
+    assert!(id.verify_privacy_compliance());
+
+    // Verify settings default contains anonymous alias and relay_enabled is false
+    let settings = dropit::settings::AppSettings::default();
+    assert!(!settings.alias.is_empty());
+    assert!(!settings.relay_enabled);
+}

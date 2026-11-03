@@ -49,8 +49,9 @@ async fn main() -> Result<()> {
             let pairing_code = token_store.pairing_session().generate_code();
             info!("Pairing code: {} (valid for 5 minutes)", pairing_code);
 
-            let device_id = format!("{:016x}", rand::random::<u64>());
-            let device_name = "Swift Falcon".to_string();
+            let settings = dropit::settings::AppSettings::load();
+            let device_id = dropit::identity::generate_anonymous_device_id();
+            let device_name = settings.alias;
 
             let server_state = ServerState::new(
                 device_id.clone(),

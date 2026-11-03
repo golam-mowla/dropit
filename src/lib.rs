@@ -1,6 +1,7 @@
 pub mod cli;
 pub mod client;
 pub mod discovery;
+pub mod identity;
 pub mod messenger;
 pub mod pairing;
 pub mod sanitize;
