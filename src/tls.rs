@@ -11,9 +11,15 @@ pub struct TlsIdentity {
     pub fingerprint: String,
 }
 
+/// Installs the Ring crypto provider as the default for rustls if not already installed.
+pub fn init_crypto_provider() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+}
+
 impl TlsIdentity {
     /// Generates a new self-signed certificate and private key for LAN file transfer.
     pub fn generate() -> Result<Self> {
+        init_crypto_provider();
         let mut params = CertificateParams::default();
         params.subject_alt_names = vec![
             rcgen::SanType::DnsName("localhost".to_string().try_into()?),

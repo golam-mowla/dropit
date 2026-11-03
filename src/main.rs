@@ -12,6 +12,7 @@ use tracing::{error, info};
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    dropit::tls::init_crypto_provider();
     // Initialize tracing subscriber
     tracing_subscriber::fmt()
         .with_env_filter(

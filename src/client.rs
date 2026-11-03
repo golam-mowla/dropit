@@ -12,6 +12,7 @@ pub struct DropItClient {
 impl DropItClient {
     /// Creates a client connecting to target (host/ip and port).
     pub fn new(host: &str, port: u16) -> Result<Self> {
+        crate::tls::init_crypto_provider();
         let client = reqwest::Client::builder()
             .danger_accept_invalid_certs(true) // baseline self-signed cert support
             .build()

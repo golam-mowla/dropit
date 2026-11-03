@@ -7,6 +7,7 @@ use std::time::Duration;
 
 #[tokio::test]
 async fn test_loopback_transfer_and_hash_verification() {
+    dropit::tls::init_crypto_provider();
     let temp_dir = tempfile::tempdir().expect("Failed to create tempdir");
     let download_dir = temp_dir.path().join("received");
     tokio::fs::create_dir_all(&download_dir).await.unwrap();

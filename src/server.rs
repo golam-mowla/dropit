@@ -175,6 +175,7 @@ pub async fn run_server(
     tls_identity: &TlsIdentity,
     mut shutdown_rx: tokio::sync::watch::Receiver<bool>,
 ) -> Result<()> {
+    crate::tls::init_crypto_provider();
     let rustls_config = axum_server::tls_rustls::RustlsConfig::from_pem(
         tls_identity.cert_pem.as_bytes().to_vec(),
         tls_identity.key_pem.as_bytes().to_vec(),
