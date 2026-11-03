@@ -6,14 +6,16 @@ use axum::{
     Json, Router,
     extract::{Multipart, State},
     http::{HeaderMap, StatusCode},
-    response::IntoResponse,
+    response::{Html, IntoResponse},
     routing::{get, post},
 };
 use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr};
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use tokio::io::AsyncWriteExt;
+use tokio::sync::Mutex;
 use tracing::info;
 
 #[derive(Clone)]
@@ -25,6 +27,31 @@ pub struct ServerState {
     pub cert_fingerprint: String,
     pub auto_accept: bool,
     pub trust_store: DeviceTrustStore,
+    pub pending_transfers: Arc<Mutex<HashMap<String, tokio::sync::oneshot::Sender<bool>>>>,
+    pub cancelled_sessions: Arc<RwLock<HashSet<String>>>,
+}
+
+impl ServerState {
+    pub fn new(
+        device_id: String,
+        name: String,
+        download_dir: PathBuf,
+        token_store: SessionTokenStore,
+        cert_fingerprint: String,
+        auto_accept: bool,
+    ) -> Self {
+        Self {
+            device_id,
+            name,
+            download_dir,
+            token_store,
+            cert_fingerprint,
+            auto_accept,
+            trust_store: DeviceTrustStore::new(),
+            pending_transfers: Arc::new(Mutex::new(HashMap::new())),
+            cancelled_sessions: Arc::new(RwLock::new(HashSet::new())),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -52,6 +79,43 @@ pub struct PairingCodeResponse {
     pub server_fingerprint: String,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct FileMetadata {
+    pub id: String,
+    pub filename: String,
+    pub size: u64,
+    pub blake3_hash: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TransferIntentRequest {
+    pub session_id: String,
+    pub sender_id: String,
+    pub sender_alias: String,
+    pub files: Vec<FileMetadata>,
+    pub total_size: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TransferIntentResponse {
+    pub session_id: String,
+    pub status: String,
+    pub reason: Option<String>,
+    pub token: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TransferDecisionRequest {
+    pub session_id: String,
+    pub accept: bool,
+    pub reason: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CancelTransferRequest {
+    pub session_id: String,
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct TransferSuccessResponse {
     pub files: Vec<TransferredFileInfo>,
@@ -66,12 +130,21 @@ pub struct TransferredFileInfo {
 
 pub fn create_router(state: ServerState) -> Router {
     Router::new()
+        .route("/", get(web_ui_handler))
+        .route("/web", get(web_ui_handler))
         .route("/health", get(health_handler))
         .route("/api/info", get(info_handler))
         .route("/api/token", post(token_handler))
         .route("/api/pairing/code", post(pairing_code_handler))
+        .route("/api/transfer/prepare", post(prepare_transfer_handler))
+        .route("/api/transfer/decision", post(decision_handler))
+        .route("/api/transfer/cancel", post(cancel_handler))
         .route("/api/transfer", post(transfer_handler))
         .with_state(Arc::new(state))
+}
+
+async fn web_ui_handler() -> Html<&'static str> {
+    Html(crate::web::INDEX_HTML)
 }
 
 async fn health_handler() -> &'static str {
@@ -139,6 +212,99 @@ async fn pairing_code_handler(
     }))
 }
 
+async fn prepare_transfer_handler(
+    State(state): State<Arc<ServerState>>,
+    Json(payload): Json<TransferIntentRequest>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    // 1. Check disk space
+    if let Err(e) = crate::pairing::verify_disk_space(&state.download_dir, payload.total_size) {
+        return Ok(Json(TransferIntentResponse {
+            session_id: payload.session_id,
+            status: "rejected".to_string(),
+            reason: Some(format!("Insufficient disk space: {}", e)),
+            token: None,
+        }));
+    }
+
+    // 2. If auto_accept is enabled, approve immediately
+    if state.auto_accept {
+        let token = state.token_store.generate_token();
+        return Ok(Json(TransferIntentResponse {
+            session_id: payload.session_id,
+            status: "accepted".to_string(),
+            reason: None,
+            token: Some(token),
+        }));
+    }
+
+    // 3. Queue for decision with 30s timeout
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    {
+        let mut map = state.pending_transfers.lock().await;
+        map.insert(payload.session_id.clone(), tx);
+    }
+
+    info!(
+        "Pending transfer approval for {} files from '{}' (session: {})",
+        payload.files.len(),
+        payload.sender_alias,
+        payload.session_id
+    );
+
+    match tokio::time::timeout(std::time::Duration::from_secs(30), rx).await {
+        Ok(Ok(true)) => {
+            let token = state.token_store.generate_token();
+            Ok(Json(TransferIntentResponse {
+                session_id: payload.session_id,
+                status: "accepted".to_string(),
+                reason: None,
+                token: Some(token),
+            }))
+        }
+        Ok(Ok(false)) => Ok(Json(TransferIntentResponse {
+            session_id: payload.session_id,
+            status: "rejected".to_string(),
+            reason: Some("Transfer declined by receiver".to_string()),
+            token: None,
+        })),
+        _ => {
+            let mut map = state.pending_transfers.lock().await;
+            map.remove(&payload.session_id);
+            Ok(Json(TransferIntentResponse {
+                session_id: payload.session_id,
+                status: "rejected".to_string(),
+                reason: Some("Transfer request timed out".to_string()),
+                token: None,
+            }))
+        }
+    }
+}
+
+async fn decision_handler(
+    State(state): State<Arc<ServerState>>,
+    Json(payload): Json<TransferDecisionRequest>,
+) -> impl IntoResponse {
+    let mut map = state.pending_transfers.lock().await;
+    if let Some(sender) = map.remove(&payload.session_id) {
+        let _ = sender.send(payload.accept);
+        (StatusCode::OK, "Decision applied")
+    } else {
+        (
+            StatusCode::NOT_FOUND,
+            "No pending transfer found for session_id",
+        )
+    }
+}
+
+async fn cancel_handler(
+    State(state): State<Arc<ServerState>>,
+    Json(payload): Json<CancelTransferRequest>,
+) -> impl IntoResponse {
+    let mut set = state.cancelled_sessions.write().unwrap();
+    set.insert(payload.session_id);
+    (StatusCode::OK, "Session marked cancelled")
+}
+
 async fn transfer_handler(
     State(state): State<Arc<ServerState>>,
     headers: HeaderMap,
@@ -162,6 +328,12 @@ async fn transfer_handler(
         ));
     }
 
+    // Optional session ID for cancellation checking
+    let session_id = headers
+        .get("X-Session-ID")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
+
     // Verify initial disk space
     if let Err(e) = crate::pairing::verify_disk_space(&state.download_dir, 1024) {
         return Err((StatusCode::INSUFFICIENT_STORAGE, e.to_string()));
@@ -179,6 +351,16 @@ async fn transfer_handler(
     let mut transferred_files = Vec::new();
 
     while let Ok(Some(mut field)) = multipart.next_field().await {
+        // Check for cancellation before processing each file
+        if let Some(ref sid) = session_id
+            && state.cancelled_sessions.read().unwrap().contains(sid)
+        {
+            return Err((
+                StatusCode::GONE,
+                "Transfer cancelled by sender or receiver".to_string(),
+            ));
+        }
+
         let raw_filename = field
             .file_name()
             .map(|s| s.to_string())
@@ -202,10 +384,24 @@ async fn transfer_handler(
         let mut total_bytes = 0u64;
 
         while let Ok(Some(chunk)) = field.chunk().await {
+            // Check cancellation mid-stream
+            if let Some(ref sid) = session_id
+                && state.cancelled_sessions.read().unwrap().contains(sid)
+            {
+                drop(file);
+                let _ = tokio::fs::remove_file(&target_path).await;
+                return Err((
+                    StatusCode::GONE,
+                    "Transfer cancelled mid-stream".to_string(),
+                ));
+            }
+
             // Verify disk space before writing chunk
             if let Err(e) =
                 crate::pairing::verify_disk_space(&state.download_dir, chunk.len() as u64)
             {
+                drop(file);
+                let _ = tokio::fs::remove_file(&target_path).await;
                 return Err((StatusCode::INSUFFICIENT_STORAGE, e.to_string()));
             }
 

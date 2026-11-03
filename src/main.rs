@@ -52,15 +52,14 @@ async fn main() -> Result<()> {
             let device_id = format!("{:016x}", rand::random::<u64>());
             let device_name = "Swift Falcon".to_string();
 
-            let server_state = ServerState {
-                device_id: device_id.clone(),
-                name: device_name.clone(),
-                download_dir: receive_args.dir,
+            let server_state = ServerState::new(
+                device_id.clone(),
+                device_name.clone(),
+                receive_args.dir,
                 token_store,
-                cert_fingerprint: tls_identity.fingerprint.clone(),
-                auto_accept: receive_args.auto_accept,
-                trust_store: dropit::pairing::DeviceTrustStore::new(),
-            };
+                tls_identity.fingerprint.clone(),
+                receive_args.auto_accept,
+            );
 
             let announcement = DeviceAnnouncement {
                 device_id,
