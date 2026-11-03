@@ -189,6 +189,22 @@ public class IconGenerator {
         using (Bitmap tUnread = GenerateTrayBitmap(32, "unread"))
             tUnread.Save(Path.Combine(baseDir, "icon-tray-unread.png"), ImageFormat.Png);
 
+        // Export raw RGBA for 32x32 window icon
+        using (Bitmap bmp32 = GenerateDropItBitmap(32)) {
+            byte[] rgba32 = new byte[32 * 32 * 4];
+            int p = 0;
+            for (int y = 0; y < 32; y++) {
+                for (int x = 0; x < 32; x++) {
+                    Color c = bmp32.GetPixel(x, y);
+                    rgba32[p++] = c.R;
+                    rgba32[p++] = c.G;
+                    rgba32[p++] = c.B;
+                    rgba32[p++] = c.A;
+                }
+            }
+            File.WriteAllBytes(Path.Combine(baseDir, "icon-32.rgba"), rgba32);
+        }
+
         using (MemoryStream icoStream = new MemoryStream()) {
             using (BinaryWriter w = new BinaryWriter(icoStream)) {
                 w.Write((ushort)0);

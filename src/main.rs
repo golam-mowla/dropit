@@ -11,15 +11,18 @@ use std::time::Duration;
 use tracing::{error, info};
 
 fn run_gui() -> Result<()> {
-    let mut viewport = eframe::egui::ViewportBuilder::default()
-        .with_title("Drop It")
-        .with_inner_size([960.0, 640.0])
-        .with_min_inner_size([720.0, 480.0])
-        .with_transparent(true);
+    let icon_data = eframe::egui::IconData {
+        rgba: include_bytes!("../assets/icon-32.rgba").to_vec(),
+        width: 32,
+        height: 32,
+    };
 
-    if let Ok(icon) = eframe::icon_data::from_png_bytes(include_bytes!("../assets/icon-256.png")) {
-        viewport = viewport.with_icon(icon);
-    }
+    let viewport = eframe::egui::ViewportBuilder::default()
+        .with_title("Drop It")
+        .with_inner_size([960.0_f32, 640.0_f32])
+        .with_min_inner_size([720.0_f32, 480.0_f32])
+        .with_transparent(true)
+        .with_icon(icon_data);
 
     let native_options = eframe::NativeOptions {
         viewport,
