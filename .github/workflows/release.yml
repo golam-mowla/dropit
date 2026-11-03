@@ -1,0 +1,66 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  release:
+    name: Build & Publish Release
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cargo Build Release
+        run: cargo build --release
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress
+
+      - name: Build Inno Setup Installer
+        run: |
+          New-Item -ItemType Directory -Force -Path dist
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer/dropit.iss
+
+      - name: Package Release Assets
+        run: |
+          $ver = "${{ github.ref_name }}"
+          if ([string]::IsNullOrEmpty($ver) -or $ver -eq "") {
+            $ver = "v0.2.0"
+          }
+          # Copy standalone executable
+          Copy-Item target/release/dropit.exe dist/dropit.exe
+
+          # Package portable zip
+          New-Item -ItemType Directory -Force -Path dropit-portable
+          Copy-Item target/release/dropit.exe dropit-portable/
+          Copy-Item README.md dropit-portable/
+          Copy-Item CHANGELOG.md dropit-portable/
+          Copy-Item assets/icon.ico dropit-portable/
+          Compress-Archive -Path dropit-portable/* -DestinationPath "dist/dropit-${ver}-windows-x64.zip" -Force
+
+          # Generate SHA256 checksums
+          Get-FileHash -Algorithm SHA256 dist/* | ForEach-Object {
+            "$($_.Hash)  $([System.IO.Path]::GetFileName($_.Path))"
+          } | Out-File -Encoding utf8 dist/SHA256SUMS.txt
+
+      - name: Publish GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          if ([string]::IsNullOrEmpty($tag) -or $tag -eq "") {
+            $tag = "v0.2.0"
+          }
+          gh release create $tag dist/* --title "Drop It $tag" --notes-file CHANGELOG.md
