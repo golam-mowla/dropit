@@ -447,7 +447,7 @@ impl DropItApp {
                                 egui::Frame::none()
                                     .fill(bubble_color)
                                     .stroke(egui::Stroke::new(1.0_f32, self.theme.card_border))
-                                    .rounding(egui::Rounding::same(14))
+                                    .rounding(egui::Rounding::same(14.0))
                                     .inner_margin(10.0)
                                     .show(ui, |ui| match &msg.payload {
                                         MessagePayload::Text(text) => {
@@ -546,8 +546,8 @@ impl DropItApp {
         ui.columns(2, |columns| {
             egui::Frame::none()
                 .fill(self.theme.card_bg)
-                .stroke(egui::Stroke::new(1.0, self.theme.card_border))
-                .rounding(egui::Rounding::same(12))
+                .stroke(egui::Stroke::new(1.0_f32, self.theme.card_border))
+                .rounding(egui::Rounding::same(12.0))
                 .inner_margin(14.0)
                 .show(&mut columns[0], |ui| {
                     ui.label(egui::RichText::new("Your code").strong().size(14.0));
@@ -572,8 +572,8 @@ impl DropItApp {
                 });
             egui::Frame::none()
                 .fill(self.theme.card_bg)
-                .stroke(egui::Stroke::new(1.0, self.theme.card_border))
-                .rounding(egui::Rounding::same(12))
+                .stroke(egui::Stroke::new(1.0_f32, self.theme.card_border))
+                .rounding(egui::Rounding::same(12.0))
                 .inner_margin(14.0)
                 .show(&mut columns[1], |ui| {
                     ui.label(
@@ -598,8 +598,8 @@ impl DropItApp {
         ui.add_space(16.0);
         egui::Frame::none()
             .fill(egui::Color32::from_rgba_premultiplied(255, 255, 255, 20))
-            .stroke(egui::Stroke::new(1.0, self.theme.card_border))
-            .rounding(egui::Rounding::same(12))
+            .stroke(egui::Stroke::new(1.0_f32, self.theme.card_border))
+            .rounding(egui::Rounding::same(12.0))
             .inner_margin(28.0)
             .show(ui, |ui| {
                 ui.vertical_centered(|ui| {
@@ -633,8 +633,8 @@ impl DropItApp {
         for peer in self.peers.clone() {
             egui::Frame::none()
                 .fill(self.theme.card_bg)
-                .stroke(egui::Stroke::new(1.0, self.theme.card_border))
-                .rounding(egui::Rounding::same(12))
+                .stroke(egui::Stroke::new(1.0_f32, self.theme.card_border))
+                .rounding(egui::Rounding::same(12.0))
                 .inner_margin(12.0)
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
